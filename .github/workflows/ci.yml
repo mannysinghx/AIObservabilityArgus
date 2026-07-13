@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  detection:
+    name: Detection service + quality gate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/detection
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Lint
+        run: ruff check .
+      - name: Unit tests + detection quality gate
+        # The quality gate (test_quality_gate.py) fails the build if precision/
+        # recall on the labeled corpus regress below the floors. Do not lower the
+        # floors to make a red build green without a reviewed reason.
+        run: pytest -q
+
+  typecheck:
+    name: TypeScript typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install
+      - run: npx tsc -b --pretty

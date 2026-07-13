@@ -1,0 +1,82 @@
+# Argus — Phase 1 (Security Sidecar) local stack.
+# Usage: from repo root  ->  docker compose -f deploy/docker-compose.yml up -d
+name: argus
+
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    container_name: argus-clickhouse
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-argus}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-argus}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-argus}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ports:
+      - "8123:8123"   # HTTP
+      - "9000:9000"   # native
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./clickhouse/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: argus-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-argus}
+      POSTGRES_USER: ${POSTGRES_USER:-argus}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-argus}
+    ports:
+      - "5433:5432"   # host 5433 to avoid colliding with a local postgres
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-argus}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: argus-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    container_name: argus-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-argus}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-argus-secret}
+    ports:
+      - "9002:9000"   # S3 API (9000 taken by clickhouse native)
+      - "9001:9001"   # console
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  clickhouse-data:
+  postgres-data:
+  redis-data:
+  minio-data:

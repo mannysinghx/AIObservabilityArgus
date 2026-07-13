@@ -1,0 +1,105 @@
+import Fastify from "fastify";
+import {
+  config,
+  redis,
+  STREAM_KEY,
+  IngestBatch,
+  otlpToObservations,
+  type OtlpTracePayload,
+  type StreamEvent,
+  type ObservationInput,
+  type TraceInput,
+} from "@argus/shared";
+import { authenticate, parseBasicAuth } from "./auth.js";
+
+const app = Fastify({
+  logger: { level: process.env.LOG_LEVEL ?? "info" },
+  bodyLimit: 16 * 1024 * 1024,
+});
+
+async function pushEvents(projectId: string, batch: IngestBatch): Promise<number> {
+  const r = redis();
+  const pipeline = r.pipeline();
+  let n = 0;
+  for (const trace of batch.traces) {
+    const ev: StreamEvent = { projectId, kind: "trace", payload: trace as TraceInput };
+    pipeline.xadd(STREAM_KEY, "*", "event", JSON.stringify(ev));
+    n++;
+  }
+  for (const obs of batch.observations) {
+    const ev: StreamEvent = {
+      projectId,
+      kind: "observation",
+      payload: obs as ObservationInput,
+    };
+    pipeline.xadd(STREAM_KEY, "*", "event", JSON.stringify(ev));
+    n++;
+  }
+  await pipeline.exec();
+  return n;
+}
+
+// ---- auth guard ----
+app.decorateRequest("projectId", "");
+app.addHook("preHandler", async (req, reply) => {
+  if (req.url === "/health") return;
+  const basic = parseBasicAuth(req.headers.authorization);
+  if (!basic) {
+    reply.code(401).send({ error: "missing Basic auth (publicKey:secret)" });
+    return;
+  }
+  const project = await authenticate(basic.user, basic.pass);
+  if (!project) {
+    reply.code(401).send({ error: "invalid credentials" });
+    return;
+  }
+  (req as unknown as { projectId: string }).projectId = project.projectId;
+});
+
+app.get("/health", async () => ({ status: "ok", service: "argus-ingest" }));
+
+/**
+ * Native / Langfuse-style batch endpoint. Body: { traces[], observations[] }.
+ * Returns 202 immediately after enqueuing.
+ */
+app.post("/api/public/ingestion", async (req, reply) => {
+  const projectId = (req as unknown as { projectId: string }).projectId;
+  const parsed = IngestBatch.safeParse(req.body);
+  if (!parsed.success) {
+    reply.code(400).send({ error: "invalid batch", details: parsed.error.issues });
+    return;
+  }
+  const n = await pushEvents(projectId, parsed.data);
+  reply.code(202).send({ accepted: n });
+});
+
+/**
+ * OTLP/HTTP JSON traces endpoint. Accepts OpenTelemetry GenAI spans and
+ * normalizes them into observations before enqueuing.
+ */
+app.post("/v1/traces", async (req, reply) => {
+  const projectId = (req as unknown as { projectId: string }).projectId;
+  let observations: ObservationInput[];
+  try {
+    observations = otlpToObservations(req.body as OtlpTracePayload);
+  } catch (err) {
+    reply.code(400).send({ error: "invalid OTLP payload", detail: String(err) });
+    return;
+  }
+  const n = await pushEvents(projectId, {
+    traces: [],
+    observations,
+  } as unknown as IngestBatch);
+  reply.code(202).send({ partialSuccess: {}, accepted: n });
+});
+
+const start = async () => {
+  try {
+    await app.listen({ port: config.ingestPort, host: "0.0.0.0" });
+    app.log.info(`argus-ingest listening on :${config.ingestPort}`);
+  } catch (err) {
+    app.log.error(err);
+    process.exit(1);
+  }
+};
+start();

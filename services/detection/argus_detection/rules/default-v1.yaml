@@ -1,0 +1,155 @@
+# Argus L1 heuristic rule pack — default-v1
+# Patterns curated for prompt-injection / jailbreak / exfil / obfuscation.
+# Each rule: id, description, category, weight (0..1 contribution), and either
+# `regex` (case-insensitive, multiline) or `kind` (a built-in structural check).
+#
+# `applies_to` limits a rule to certain taint classes so we don't, e.g., flag a
+# user *asking about* prompt injection with the same weight as a document that
+# *contains* one. Values: user, system, untrusted_external, model, any.
+#
+# IMPORTANT: keep weights conservative. L1 escalates to L2/L3; a single L1 hit
+# should rarely alone produce a high-severity event (see scoring.py).
+
+meta:
+  ruleset: default-v1
+
+rules:
+  # ---------------- instruction override families ----------------
+  - id: R-OVR-001
+    description: "Ignore/disregard previous instructions"
+    category: direct_injection
+    applies_to: any
+    weight: 0.55
+    regex: '\b(ignore|disregard|forget|override)\b[^.\n]{0,40}\b(previous|prior|above|earlier|all|any|the following|your)\b[^.\n]{0,40}\b(instruction|instructions|prompt|prompts|rule|rules|context|direction|directions)\b'
+
+  - id: R-OVR-002
+    description: "You are now / new persona assignment"
+    category: jailbreak
+    applies_to: any
+    weight: 0.4
+    # "act as if you are" (state reassignment) is jailbreak-shaped; bare "act as
+    # a tutor" is a legit roleplay request, so it's excluded.
+    regex: '\byou are (now|no longer)\b|\bfrom now on,? you\b|\bact as if you\b'
+
+  - id: R-OVR-003
+    description: "New/updated instructions marker"
+    category: direct_injection
+    applies_to: any
+    weight: 0.4
+    regex: '\b(new|updated|revised|real|actual|true|system)\s+(instruction|instructions|prompt|directive|task)s?\s*[:\-]'
+
+  - id: R-OVR-004
+    description: "Fake system/role delimiter spoofing"
+    category: direct_injection
+    applies_to: any
+    weight: 0.5
+    regex: '</?(system|assistant|user|instruction|im_start|im_end)\s*>|\[/?(INST|SYS|SYSTEM)\]|<\|.*?\|>'
+
+  # ---------------- jailbreak archetypes ----------------
+  - id: R-JB-001
+    description: "DAN / do-anything-now style jailbreak"
+    category: jailbreak
+    applies_to: any
+    weight: 0.55
+    regex: '\bDAN\b|\bdo anything now\b|\bdeveloper mode\b|\bjailbreak\b|\bunfiltered\b|\bwithout any restrictions\b'
+
+  - id: R-JB-002
+    description: "Refusal-suppression / safety-bypass phrasing"
+    category: jailbreak
+    applies_to: any
+    weight: 0.45
+    regex: '\b(do not|don''t|never)\b[^.\n]{0,30}\b(refuse|decline|warn|apologize|mention|say you can''t)\b|\bwithout (any )?(warning|disclaimer|refusal)\b'
+
+  - id: R-JB-004
+    description: "Named jailbreak persona or explicit no-policy framing"
+    category: jailbreak
+    applies_to: any
+    weight: 0.5
+    # These phrases are jailbreak-intrinsic — roleplay framing ("a game where…",
+    # "called…") doesn't excuse them, so don't apply reported-speech mitigation.
+    mitigable: false
+    regex: '\b(freedomgpt|based ?gpt|evilgpt|stan|aim|dude gpt)\b|\bno content (policy|filter|filters|restrictions?)\b|\bcontent polic(y|ies) whatsoever\b|\bwith no (restrictions?|filters?|rules?|policy|guidelines?)\b|\bpretend (you are|to be)\b[^.\n]{0,30}\b(ai|gpt|model|assistant|system)\b'
+
+  - id: R-JB-003
+    description: "Reveal system prompt / hidden instructions"
+    category: prompt_leak
+    applies_to: any
+    weight: 0.5
+    regex: '\b(reveal|print|repeat|show|output|tell me|what (are|were))\b[^.\n]{0,40}\b(system prompt|initial instructions|hidden (instructions|prompt)|your (instructions|rules|prompt|guidelines))\b'
+
+  # ---------------- indirect-injection signatures (in ingested content) ----
+  - id: R-IND-001
+    description: "Content addresses an AI/assistant with an imperative"
+    category: indirect_injection
+    applies_to: untrusted_external
+    weight: 0.5
+    regex: '\b(AI|assistant|language model|chatbot|agent|LLM|you)\b[^.\n]{0,20}\b(must|should|shall|need to|are required to|are instructed to)\b'
+
+  - id: R-IND-002
+    description: "Imperative to contact/email/send to an address in a document"
+    category: exfiltration
+    applies_to: untrusted_external
+    weight: 0.55
+    # No trailing \b on the verb so "send_email"/"sendData" still match (an
+    # underscore is a word char and would otherwise block \bsend\b). The
+    # (?!\s*:) negative lookahead skips field labels like "email: joe@x.com"
+    # (data), matching only imperative "email … to a@b" (instruction).
+    regex: '\b(send|email|e-mail|forward|post|upload|transmit|exfiltrate|leak)(?!\s*:)[^.\n]{0,40}(\bto\b)?[^\n]{0,20}[\w.+-]+@[\w-]+\.[a-z]{2,}'
+
+  - id: R-IND-003
+    description: "Instruction to conceal actions from the user"
+    category: indirect_injection
+    applies_to: untrusted_external
+    weight: 0.5
+    regex: '\b(do not|don''t|never)\b[^.\n]{0,30}\b(mention|tell|inform|reveal|disclose|notify)\b[^.\n]{0,20}\b(the user|anyone|them|this)\b'
+
+  - id: R-IND-004
+    description: "Tool/function-call injection in ingested content"
+    category: indirect_injection
+    applies_to: untrusted_external
+    weight: 0.45
+    regex: '\b(call|invoke|execute|run|use)\b[^.\n]{0,20}\b(the )?(function|tool|api|command|endpoint)\b|<tool_call>|"function":\s*"'
+
+  # ---------------- output-side exfiltration ----------------
+  - id: R-EXF-001
+    description: "Markdown image/link with data-bearing query to external host"
+    category: exfiltration
+    applies_to: any
+    weight: 0.5
+    regex: '!\[[^\]]*\]\(https?://[^)]*\?[^)]*\)|\]\(https?://[^)]*(\?|%20|data=|q=)[^)]*\)'
+
+  - id: R-EXF-002
+    description: "Suspicious URL construction concatenating variables/secrets"
+    category: exfiltration
+    applies_to: any
+    weight: 0.35
+    regex: 'https?://[^\s)"]*(\{\{?[^}]+\}?\}|\$\{[^}]+\}|"\s*\+\s*)'
+
+  # ---------------- obfuscation markers ----------------
+  - id: R-OBF-001
+    description: "Zero-width / invisible Unicode characters"
+    category: obfuscation
+    applies_to: any
+    weight: 0.4
+    kind: invisible_unicode
+
+  - id: R-OBF-002
+    description: "Right-to-left override / bidi control characters"
+    category: obfuscation
+    applies_to: any
+    weight: 0.4
+    kind: bidi_control
+
+  - id: R-OBF-003
+    description: "High-entropy base64/hex blob (possible encoded payload)"
+    category: obfuscation
+    applies_to: any
+    weight: 0.3
+    kind: encoded_blob
+
+  - id: R-OBF-004
+    description: "Excessive homoglyph / mixed-script density"
+    category: obfuscation
+    applies_to: any
+    weight: 0.3
+    kind: mixed_script

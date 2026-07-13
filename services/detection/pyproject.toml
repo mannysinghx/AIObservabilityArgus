@@ -1,0 +1,39 @@
+[project]
+name = "argus-detection"
+version = "0.1.0"
+description = "Argus security detection service — L1 heuristics through L4 trace analysis"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "pydantic>=2.6",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+# L2 classifier models are optional/pluggable — not required for the Phase 1 heuristic MVP.
+l2 = [
+    "transformers>=4.40",
+    "torch>=2.2",
+]
+dev = [
+    "pytest>=8.0",
+    "httpx>=0.27",
+    "ruff>=0.4",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["argus_detection*"]
+
+[tool.setuptools.package-data]
+argus_detection = ["rules/*.yaml", "corpus/*.jsonl"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100

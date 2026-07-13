@@ -1,0 +1,18 @@
+{
+  "name": "argus",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Argus — security-first AI observability platform",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "ingest": "npm --workspace @argus/ingest run dev",
+    "worker": "npm --workspace @argus/worker run dev",
+    "typecheck": "tsc -b --pretty"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,28 @@
+# env & secrets
+.env
+*.local
+
+# node
+node_modules/
+dist/
+*.tsbuildinfo
+.turbo/
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.mypy_cache/
+
+# os / editor
+.DS_Store
+.idea/
+.vscode/
+
+# data
+/data/
+*.log

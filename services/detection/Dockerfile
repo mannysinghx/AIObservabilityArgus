@@ -13,5 +13,6 @@ RUN pip install --no-cache-dir -e .
 ENV PORT=8000
 EXPOSE 8000
 
-# Binds $PORT (Railway/Render) or falls back to 8000.
-CMD ["sh", "-c", "uvicorn argus_detection.app:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Dual-stack launcher (serves IPv4 + IPv6 on $PORT). IPv6 is required for
+# Railway private networking; IPv4 for its health-check probe. See serve.py.
+CMD ["python", "-m", "argus_detection.serve"]

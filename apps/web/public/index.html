@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Argus — Security Observability</title>
+  <link rel="stylesheet" href="/app.css">
+  <style>
+    /* dashboard-only additions on top of the shared design tokens */
+    .loading { color: var(--ink-faint); font-size: 13px; padding: calc(var(--u)*3); }
+    .empty { color: var(--ink-faint); font-size: 13px; padding: calc(var(--u)*4); text-align: center; }
+    .clickable { cursor: pointer; }
+    .breakdown { display: grid; gap: 7px; padding: calc(var(--u)*2.6) calc(var(--u)*3.2); font-size: 12.5px; }
+    .breakdown .row { display: flex; justify-content: space-between; align-items: center; }
+    .barmini { height: 6px; border-radius: 99px; background: var(--surface-2); overflow: hidden; flex: 1; margin: 0 10px; }
+    .barmini b { display: block; height: 100%; background: var(--accent); }
+    .back { background: none; border: none; color: var(--accent); cursor: pointer; font: inherit; font-size: 12.5px; padding: 0; }
+    .metric-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px,1fr)); gap: calc(var(--u)*2.5); }
+    table.data { width: 100%; border-collapse: collapse; min-width: 720px; }
+    table.data th { text-align:left; font-size:10px; letter-spacing:.09em; text-transform:uppercase; color:var(--ink-faint); font-weight:600; padding:calc(var(--u)*1.6) calc(var(--u)*2.4); border-bottom:1px solid var(--line); white-space:nowrap; }
+    table.data td { padding:calc(var(--u)*1.7) calc(var(--u)*2.4); border-bottom:1px solid var(--line); font-size:12.5px; white-space:nowrap; }
+    table.data tr:last-child td { border-bottom:none; }
+    table.data tr.clickable:hover td { background: var(--surface-2); }
+    .status-banner { display:none; margin:0 calc(var(--u)*5); padding:10px 14px; border-radius:var(--radius); background:color-mix(in srgb,var(--sev-critical) 12%,transparent); color:var(--sev-critical); font-size:12.5px; }
+  </style>
+</head>
+<body>
+<div class="shell">
+  <nav class="rail" aria-label="Primary">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <div><div class="brand-name">Argus</div><div class="brand-env" id="envLabel">live</div></div>
+    </div>
+    <div class="nav-group">
+      <div class="nav-label">Security</div>
+      <button class="nav-item active" type="button" data-nav="threat"><span class="nav-ico">◉</span>Threat Center<span class="nav-badge" id="critBadge" style="display:none">0</span></button>
+    </div>
+    <div class="nav-group">
+      <div class="nav-label">Observability</div>
+      <button class="nav-item" type="button" data-nav="traces"><span class="nav-ico">≣</span>Traces</button>
+      <button class="nav-item" type="button" data-nav="analytics"><span class="nav-ico">◔</span>Analytics</button>
+    </div>
+    <div class="rail-foot">
+      <button class="nav-item" type="button" data-nav="appearance"><span class="nav-ico">⚙</span>Appearance</button>
+    </div>
+  </nav>
+
+  <div class="main">
+    <header class="topbar">
+      <button class="ctx" type="button" id="refreshBtn"><span class="k">↻</span> Refresh</button>
+      <span class="page-sub" id="lastUpdated" style="font-size:12px;"></span>
+      <div class="cmdk" style="margin-left:auto;">Argus dashboard · read-only</div>
+      <span class="avatar">A</span>
+    </header>
+    <div class="status-banner" id="statusBanner"></div>
+
+    <main class="content">
+      <!-- THREAT CENTER -->
+      <section class="view on" id="view-threat">
+        <div class="page-head">
+          <h1 class="page-title">Threat Center</h1>
+          <span class="page-sub"><span class="live-dot"></span><span id="threatSub">loading…</span></span>
+        </div>
+        <div class="kpis" id="kpis"><div class="loading">loading KPIs…</div></div>
+        <div class="grid-23">
+          <div class="card">
+            <div class="card-head"><span class="card-title">Attack feed</span><span class="card-hint">most recent security events · click a row to open its trace</span></div>
+            <div class="tablewrap"><table class="feed" id="attackFeed"><tbody><tr><td class="loading">loading…</td></tr></tbody></table></div>
+          </div>
+          <div class="stack">
+            <div class="card">
+              <div class="card-head"><span class="card-title">By severity</span></div>
+              <div class="breakdown" id="bySeverity"></div>
+            </div>
+            <div class="card">
+              <div class="card-head"><span class="card-title">By category</span></div>
+              <div class="breakdown" id="byCategory"></div>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><span class="card-title">Events over time</span>
+            <div class="chart-legend">
+              <span style="--c: var(--sev-critical)">Indirect injection</span>
+              <span style="--c: var(--sev-high)">Direct / jailbreak</span>
+              <span style="--c: var(--sev-low)">Output-side</span>
+            </div>
+          </div>
+          <div class="pad chartwrap chart"><svg id="trendChart" viewBox="0 0 960 200" role="img" aria-label="Events over time"></svg></div>
+        </div>
+      </section>
+
+      <!-- TRACES -->
+      <section class="view" id="view-traces">
+        <div class="page-head"><h1 class="page-title">Traces</h1><span class="page-sub" id="tracesSub"></span></div>
+        <div class="card"><div class="tablewrap"><table class="data" id="tracesTable"><tbody><tr><td class="loading">loading…</td></tr></tbody></table></div></div>
+      </section>
+
+      <!-- TRACE DETAIL -->
+      <section class="view" id="view-trace">
+        <div class="page-head" style="gap:16px;">
+          <button class="back" id="backToTraces">← Traces</button>
+          <h1 class="page-title" style="font-size:16px;">Trace <span class="mono" id="traceIdLabel" style="color:var(--ink-muted)"></span></h1>
+          <span id="traceSevPill"></span>
+        </div>
+        <div class="trace-grid">
+          <div class="card">
+            <div class="trace-meta" id="traceMeta"></div>
+            <div class="wf" id="waterfall"></div>
+            <div class="taint-legend">
+              <span><span class="sw" style="background:var(--taint-wash);border:1px solid var(--sev-high)"></span>untrusted (taint source)</span>
+              <span><span class="sw" style="background:var(--taint-influenced);border:1px solid var(--line)"></span>taint-influenced</span>
+              <span><span class="sw" style="background:var(--canary-wash);border:1px solid var(--sev-critical)"></span>security event</span>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><span class="card-title">Security events</span></div>
+            <div class="pad stack" id="traceEvents" style="gap:12px;"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ANALYTICS -->
+      <section class="view" id="view-analytics">
+        <div class="page-head"><h1 class="page-title">Analytics</h1><span class="page-sub">cost, tokens & latency</span></div>
+        <div class="kpis metric-tiles" id="analyticsTiles"><div class="loading">loading…</div></div>
+        <div class="grid-23">
+          <div class="card">
+            <div class="card-head"><span class="card-title">Cost & tokens by model</span></div>
+            <div class="tablewrap"><table class="data" id="modelTable"><tbody></tbody></table></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><span class="card-title">Observations by type</span></div>
+            <div class="breakdown" id="byType"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- APPEARANCE -->
+      <section class="view" id="view-appearance">
+        <div class="page-head"><h1 class="page-title">Appearance</h1><span class="page-sub">applies instantly — same token system as the design spec</span></div>
+        <div class="card" style="max-width:560px;">
+          <div class="set-row" style="padding:calc(var(--u)*2.6) calc(var(--u)*3.2);display:grid;gap:10px;">
+            <div class="set-name" style="font-weight:600;">Theme</div>
+            <div class="seg" data-set="theme"><button type="button" data-val="system" class="on">System</button><button type="button" data-val="light">Light</button><button type="button" data-val="dark">Dark</button></div>
+          </div>
+          <div class="set-row" style="padding:calc(var(--u)*2.6) calc(var(--u)*3.2);display:grid;gap:10px;border-top:1px solid var(--line);">
+            <div class="set-name" style="font-weight:600;">Accent</div>
+            <div class="swatches" data-set="accent" style="display:flex;gap:10px;">
+              <button class="swatch on" type="button" data-val="" style="width:30px;height:30px;border-radius:50%;background:#35B5A4;border:2px solid var(--ink);cursor:pointer;"></button>
+              <button class="swatch" type="button" data-val="indigo" style="width:30px;height:30px;border-radius:50%;background:#5B6EE8;border:2px solid transparent;cursor:pointer;"></button>
+              <button class="swatch" type="button" data-val="ember" data-name="ember" style="width:30px;height:30px;border-radius:50%;background:#D26A3F;border:2px solid transparent;cursor:pointer;"></button>
+              <button class="swatch" type="button" data-val="steel" style="width:30px;height:30px;border-radius:50%;background:#5C7C9E;border:2px solid transparent;cursor:pointer;"></button>
+            </div>
+          </div>
+          <div class="set-row" style="padding:calc(var(--u)*2.6) calc(var(--u)*3.2);display:grid;gap:10px;border-top:1px solid var(--line);">
+            <div class="set-name" style="font-weight:600;">Density</div>
+            <div class="seg" data-set="density"><button type="button" data-val="" class="on">Comfortable</button><button type="button" data-val="compact">Compact</button></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+<script src="/app.js"></script>
+</body>
+</html>

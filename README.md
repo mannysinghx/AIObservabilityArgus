@@ -178,6 +178,7 @@ to kill this kind of product is false positives, not missed attacks.
 ```
 apps/ingest         TS ingestion API — OTLP/HTTP JSON + native/Langfuse batch
 apps/worker         TS trace worker (→ ClickHouse) + security worker (→ detection)
+apps/web            TS dashboard — Threat Center, Traces, trace waterfall, Analytics
 services/detection  Python detection pipeline (L1–L4) + corpus + quality gate
 packages/shared     TS types, config, ClickHouse/Redis clients, GenAI mapping
 deploy/             docker-compose + ClickHouse/Postgres migrations
@@ -194,9 +195,10 @@ docs/               design docs 01–08 (vision, architecture, detection, UI spe
 - ✅ Detection quality gate with hard-negative corpus, enforced in CI
 - ✅ Webhook alerting with trace-linked payloads
 - ✅ Verified demo (poisoned → 2 correct events; benign → 0)
+- ✅ **Live dashboard** (`apps/web`) — read-only Threat Center, Traces + taint-tinted waterfall, Analytics, reading ClickHouse
 - 🔜 **Phase 2:** L3 judge, canary tokens end-to-end, pgvector self-hardening corpus, cross-trace RAG-poisoning correlation, Incidents UI
-- 🔜 **Live dashboard:** Next.js UI reading ClickHouse (design in [docs/08](docs/08-ui-design-spec.md))
-- 🔜 **Phase 3+:** observability parity (analytics, prompts, evals), gateway/blocking mode, scheduled red-teaming
+- 🔜 **Dashboard next:** analyst actions (confirm / false-positive), saved views, dashboard builder (per [docs/08](docs/08-ui-design-spec.md))
+- 🔜 **Phase 3+:** observability parity (prompts, evals), gateway/blocking mode, scheduled red-teaming
 
 See [docs/06-roadmap.md](docs/06-roadmap.md) for the full plan.
 

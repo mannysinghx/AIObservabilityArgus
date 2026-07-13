@@ -13,7 +13,9 @@ export const config = {
   detectionUrl: process.env.DETECTION_URL ?? "http://localhost:8000",
   detectionEnableL2: (process.env.DETECTION_ENABLE_L2 ?? "false") === "true",
 
-  ingestPort: Number(process.env.INGEST_PORT ?? 3001),
+  // PORT is the platform-provided variable on Railway/Render/Fly; INGEST_PORT
+  // is the explicit local override.
+  ingestPort: Number(process.env.PORT ?? process.env.INGEST_PORT ?? 3001),
 
   alertWebhookUrl: process.env.ALERT_WEBHOOK_URL ?? "",
   alertMinSeverity: (process.env.ALERT_MIN_SEVERITY ?? "high") as

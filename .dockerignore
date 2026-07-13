@@ -1,0 +1,15 @@
+**/node_modules
+**/dist
+**/.venv
+**/venv
+**/__pycache__
+**/*.pyc
+.git
+.github
+.env
+*.local
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+*.log
+scratchpad

@@ -105,7 +105,26 @@ detection, exfil-flow analysis, behavior-deviation scoring, and canary-token
 egress. Full design in
 [docs/04-security-detection-engine.md](docs/04-security-detection-engine.md).
 
-## Quick start
+## Deploy it
+
+Self-hostable by anyone — full guide in [docs/09-deployment.md](docs/09-deployment.md).
+
+```bash
+# whole platform on a VM, one command (infra + migrations + all services)
+docker compose -f deploy/docker-compose.prod.yml up -d --build
+```
+
+- **VM / Docker Compose** — the command above; only the ingest port (3001) is exposed. ✅ verified end-to-end
+- **Railway** — managed Postgres + Redis plugins, a ClickHouse service, and the three app services from this repo (each ships a `railway.json`)
+- **Bare / Kubernetes** — plain containers; point them at managed stores (ClickHouse Cloud, RDS/Neon, Upstash, S3)
+
+**Everything is stored, untruncated, for future analysis** — full prompt/completion/tool
+I/O (`observations.input_full`/`output_full`), every finding with layer
+provenance, and an append-only `raw_events` archive so historical traffic can be
+**re-scored by future detector versions**. Nothing is deleted without per-project
+retention.
+
+## Local development
 
 Requires Docker, Python ≥ 3.10, Node ≥ 20. Full details in [RUNBOOK.md](RUNBOOK.md).
 
@@ -193,7 +212,8 @@ See [docs/06-roadmap.md](docs/06-roadmap.md) for the full plan.
 | [06 — Roadmap](docs/06-roadmap.md) | Phased build plan |
 | [07 — References](docs/07-references.md) | Standards, tools, papers, datasets |
 | [08 — UI Design Spec](docs/08-ui-design-spec.md) | Design system, theming/white-label, key screens |
-| [RUNBOOK.md](RUNBOOK.md) | How to run the stack and reproduce the demo |
+| [09 — Deployment](docs/09-deployment.md) | Self-host on a VM, Railway, or Kubernetes |
+| [RUNBOOK.md](RUNBOOK.md) | How to run the stack locally and reproduce the demo |
 
 ## Built on
 

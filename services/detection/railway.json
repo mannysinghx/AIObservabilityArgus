@@ -5,7 +5,6 @@
     "dockerfilePath": "services/detection/Dockerfile"
   },
   "deploy": {
-    "healthcheckPath": "/health",
     "restartPolicyType": "ON_FAILURE",
     "numReplicas": 1
   }

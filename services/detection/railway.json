@@ -5,6 +5,9 @@
     "dockerfilePath": "services/detection/Dockerfile"
   },
   "deploy": {
+    "startCommand": "uvicorn argus_detection.app:app --host :: --port 8000",
+    "healthcheckPath": "/health",
+    "healthcheckTimeout": 300,
     "restartPolicyType": "ON_FAILURE",
     "numReplicas": 1
   }

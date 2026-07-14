@@ -46,6 +46,16 @@ const ARGUS_PUBLIC_KEY = process.env.ARGUS_PUBLIC_KEY || "";
 const ARGUS_SECRET_KEY = process.env.ARGUS_SECRET_KEY || "";
 const ARGUS_ENABLED = Boolean(ARGUS_PUBLIC_KEY && ARGUS_SECRET_KEY);
 
+if (!ARGUS_ENABLED) {
+  // Warn once at load time rather than silently dropping every trace —
+  // fire-and-forget should be quiet about *transient* failures (Argus is
+  // down), not about a *permanent* misconfiguration (no keys set), which is
+  // almost always a mistake worth surfacing immediately.
+  console.warn(
+    "[argus-tracer] ARGUS_PUBLIC_KEY/ARGUS_SECRET_KEY not set — tracing is disabled, no traces will be sent.",
+  );
+}
+
 function authHeader() {
   const raw = `${ARGUS_PUBLIC_KEY}:${ARGUS_SECRET_KEY}`;
   return "Basic " + Buffer.from(raw).toString("base64");

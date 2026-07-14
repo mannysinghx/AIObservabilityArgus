@@ -65,6 +65,17 @@
     .err-box { display: none; border: 1px solid color-mix(in srgb, var(--sev-critical) 40%, var(--line)); background: color-mix(in srgb, var(--sev-critical) 8%, transparent); border-radius: var(--radius); padding: 10px 14px; font-size: 12.5px; color: var(--sev-critical); }
     .view-step { display: none; }
     .view-step.on { display: grid; gap: calc(var(--u)*4); }
+    .tab-advanced { color: var(--ink-faint); font-weight: 500; }
+    .intro-note { padding: calc(var(--u)*2.2) calc(var(--u)*3.2); font-size: 12.5px; color: var(--ink-muted); border-bottom: 1px solid var(--line); }
+    .intro-note b { color: var(--ink); }
+    .howto { padding: calc(var(--u)*2.2) calc(var(--u)*3.2) calc(var(--u)*1); }
+    .howto ol { margin: 0; padding-left: 20px; font-size: 12.5px; color: var(--ink); line-height: 1.9; }
+    .howto ol code { font-family: var(--font-mono); font-size: 11.5px; background: var(--surface-2); border-radius: 4px; padding: 1px 5px; }
+    .runline { display: flex; align-items: center; gap: 8px; padding: calc(var(--u)*1.8) calc(var(--u)*3.2) calc(var(--u)*2.6); }
+    .runline .lbl { font-size: 11.5px; font-weight: 600; color: var(--ink-faint); flex: none; }
+    .runline .keybox { flex: 1; }
+    .next-note { padding: calc(var(--u)*2.2) calc(var(--u)*3.2); font-size: 12px; color: var(--ink-muted); border-top: 1px solid var(--line); }
+    .next-note a { color: var(--accent); }
   </style>
 </head>
 <body>
@@ -130,30 +141,37 @@
   <!-- STEP 3 -->
   <section class="view-step" id="step3">
     <div class="card">
-      <div class="card-head"><span class="card-title">3. Send your first trace</span><span class="card-hint">pick your stack</span></div>
+      <div class="card-head"><span class="card-title">3. Test your connection</span></div>
+      <div class="intro-note">This step just proves your API key works — it sends <b>one harmless test message</b>, nothing from your real app. Pick how you want to send it below, follow the numbered steps, then check the status underneath.</div>
       <div class="tabs" id="snippetTabs">
-        <button class="tab-btn active" data-tab="curl" type="button">cURL</button>
+        <button class="tab-btn active" data-tab="curl" type="button">Terminal (cURL)</button>
         <button class="tab-btn" data-tab="node" type="button">Node.js</button>
         <button class="tab-btn" data-tab="python" type="button">Python</button>
-        <button class="tab-btn" data-tab="otlp" type="button">OpenTelemetry</button>
+        <button class="tab-btn" data-tab="otlp" type="button"><span class="tab-advanced">OpenTelemetry (advanced)</span></button>
       </div>
+      <div class="howto"><ol id="howtoList"></ol></div>
       <div class="snippet-wrap">
         <button class="copy-btn snippet-copy" data-copy-snippet="1" type="button">Copy</button>
         <pre class="snippet" id="snippetOut"></pre>
       </div>
+      <div class="runline" id="runLine" style="display:none">
+        <span class="lbl">Then run:</span>
+        <div class="keybox"><span id="runCmdOut"></span><button class="copy-btn" data-copy="runCmdOut" type="button">Copy</button></div>
+      </div>
+      <div class="next-note">This only tests the connection. Once you see "Connected" below, you're ready to add real tracing to your app — see the full <a href="/?guide=onboarding" target="_blank">step-by-step integration guide</a>.</div>
     </div>
 
     <div class="card">
       <div class="status-row">
         <span class="status-dot pulse" id="statusDot"></span>
-        <span id="statusText">Waiting for your first trace…</span>
+        <span id="statusText">Waiting for your test message…</span>
       </div>
     </div>
 
     <div class="card" id="successCard" style="display:none">
       <div class="pad" style="text-align:center; padding: calc(var(--u)*4) calc(var(--u)*3); display:grid; gap:12px; justify-items:center;">
         <span class="success-icon">✅</span>
-        <div style="font-size:16px; font-weight:650;">You're connected</div>
+        <div style="font-size:16px; font-weight:650;">It works — you're connected</div>
         <div class="dim" id="successSub" style="font-size:12.5px;"></div>
         <div class="field" style="width:100%; max-width:520px;">
           <label>Your personalized dashboard link</label>
@@ -161,6 +179,7 @@
           <span class="hint">Bookmark this — it filters the dashboard to only your project's traces and security events.</span>
         </div>
         <a class="btn btn-primary" id="openDashBtn" href="/" style="text-decoration:none; display:inline-block;">Open your dashboard →</a>
+        <div class="hint" style="max-width:520px;">Next: replace the test snippet with real calls in your app's code so it tracks actual usage. Full guide: <a href="/?guide=onboarding" target="_blank">the integration guide</a>.</div>
       </div>
     </div>
   </section>

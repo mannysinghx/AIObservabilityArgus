@@ -432,4 +432,17 @@ $("#refreshBtn").addEventListener("click", () => load(document.querySelector(".n
 function load(view) {
   ({ overview: loadOverview, threat: loadThreat, incidents: loadIncidents, review: loadReview, traces: loadTraces, sessions: loadSessions, analytics: loadAnalytics, evals: loadEvals }[view] || (() => {}))();
 }
-loadOverview();
+
+// ---------- deep link from onboarding: ?guide=onboarding opens the User
+// Guide straight to the "Connect a new app" section ----------
+const GUIDE_DEEP_LINK = new URLSearchParams(location.search).get("guide");
+if (GUIDE_DEEP_LINK === "onboarding") {
+  show("guide");
+  // No need to wait a frame — toggling display:grid via classList.toggle
+  // applies synchronously, and scrollIntoView forces layout on demand.
+  const target = document.getElementById("g-onboarding");
+  if (target) target.scrollIntoView({ behavior: "instant", block: "start" });
+  document.querySelectorAll(".guide-toc .toc-link").forEach((b) => b.classList.toggle("active", b.dataset.scroll === "g-onboarding"));
+} else {
+  loadOverview();
+}

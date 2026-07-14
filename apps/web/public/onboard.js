@@ -80,6 +80,10 @@ function flashCopied(btn) {
 }
 
 // ---------- snippets ----------
+// Kept free of "how to run this" comments on purpose — that explanation lives
+// in HOWTO below, rendered as visible numbered steps, not buried in code
+// where it's easy to skip past.
+
 function curlSnippet() {
   const ts = new Date().toISOString();
   return `curl -X POST '${project.ingestUrl}' \\
@@ -105,8 +109,7 @@ function curlSnippet() {
 }
 
 function nodeSnippet() {
-  return `// npm install not required — uses global fetch (Node 18+)
-const INGEST_URL = "${project.ingestUrl}";
+  return `const INGEST_URL = "${project.ingestUrl}";
 const AUTH = "Basic " + Buffer.from("${project.publicKey}:${project.secretKey}").toString("base64");
 
 async function sendTrace() {
@@ -130,10 +133,7 @@ async function sendTrace() {
   });
 }
 
-sendTrace();
-
-// For a real integration with RAG/tool spans, see the full tracer example:
-// docs/10-integration-example-nodejs.md`;
+sendTrace();`;
 }
 
 function pythonSnippet() {
@@ -169,22 +169,53 @@ urllib.request.urlopen(req, timeout=10)`;
 
 function otlpSnippet() {
   const otlpUrl = project.ingestUrl.replace(/\/api\/public\/ingestion$/, "/v1/traces");
-  return `# Already instrumented with OpenTelemetry? Point your OTLP/HTTP exporter
-# here instead of the batch endpoint above — same auth, GenAI semantic
-# conventions are mapped automatically.
-
-OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=${otlpUrl}
-OTEL_EXPORTER_OTLP_TRACES_HEADERS=authorization=Basic ${btoa(`${project.publicKey}:${project.secretKey}`)}
-
-# Retrieval and tool spans are classified untrusted by default — no manual
-# tagging needed. See docs/02-architecture.md for the attribute mapping.`;
+  return `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=${otlpUrl}
+OTEL_EXPORTER_OTLP_TRACES_HEADERS=authorization=Basic ${btoa(`${project.publicKey}:${project.secretKey}`)}`;
 }
 
 const SNIPPETS = { curl: curlSnippet, node: nodeSnippet, python: pythonSnippet, otlp: otlpSnippet };
 
+// Plain-language "what do I do with this" steps, shown above the code —
+// this is the part that was missing before: a snippet with no instructions
+// leaves anyone unsure whether to paste it into a terminal, a file, or
+// their app. Each tab spells out exactly where it goes and how to run it.
+const HOWTO = {
+  curl: [
+    "Open a terminal — <b>Terminal</b> on Mac/Linux, <b>Command Prompt</b> or <b>PowerShell</b> on Windows.",
+    "Copy the command below, paste it into the terminal, and press <b>Enter</b>.",
+  ],
+  node: [
+    "Copy the code below.",
+    "Save it into a new file named <code>argus-test.js</code> (any folder is fine).",
+    "Open a terminal in that same folder, then run the command underneath the code.",
+    "Requires Node.js 18 or newer — check with <code>node -v</code>.",
+  ],
+  python: [
+    "Copy the code below.",
+    "Save it into a new file named <code>argus_test.py</code> (any folder is fine).",
+    "Open a terminal in that same folder, then run the command underneath the code.",
+    "Requires Python 3 — check with <code>python3 --version</code>.",
+  ],
+  otlp: [
+    "Only use this if your app already sends data with OpenTelemetry — otherwise use one of the other tabs.",
+    "Add the two lines below to your app's environment configuration (e.g. a <code>.env</code> file, or your hosting platform's environment variable settings).",
+    "Restart your application. No code changes needed.",
+  ],
+};
+const RUN_CMD = { curl: "", node: "node argus-test.js", python: "python3 argus_test.py", otlp: "" };
+
 function renderSnippet(tab) {
   document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
   $("#snippetOut").textContent = SNIPPETS[tab]();
+  $("#howtoList").innerHTML = HOWTO[tab].map((step) => `<li>${step}</li>`).join("");
+  const runCmd = RUN_CMD[tab];
+  const runLine = $("#runLine");
+  if (runCmd) {
+    $("#runCmdOut").textContent = runCmd;
+    runLine.style.display = "flex";
+  } else {
+    runLine.style.display = "none";
+  }
 }
 document.querySelectorAll(".tab-btn").forEach((b) => b.addEventListener("click", () => renderSnippet(b.dataset.tab)));
 

@@ -48,13 +48,24 @@ function breakdown(sel, items, isSev) {
 }
 
 // ---------- routing ----------
-const VIEWS = ["overview", "threat", "incidents", "review", "redteam", "traces", "trace", "sessions", "analytics", "prompts", "evals", "appearance"];
+const VIEWS = ["overview", "threat", "incidents", "review", "redteam", "traces", "trace", "sessions", "analytics", "prompts", "evals", "appearance", "guide"];
 function show(view) {
   VIEWS.forEach((v) => $(`#view-${v}`).classList.toggle("on", v === view));
   document.querySelectorAll(".nav-item[data-nav]").forEach((b) => b.classList.toggle("active", b.dataset.nav === view));
   window.scrollTo({ top: 0 });
 }
 document.querySelectorAll("[data-nav]").forEach((el) => el.addEventListener("click", () => { const v = el.dataset.nav; show(v); load(v); }));
+
+// ---------- User Guide: table-of-contents scrolling ----------
+document.querySelectorAll("[data-scroll]").forEach((el) => el.addEventListener("click", () => {
+  const id = el.dataset.scroll;
+  // Links inside guide body text (e.g. "see Trace detail below") may live
+  // outside the currently-visible view — make sure the guide view is shown first.
+  if (!$("#view-guide").classList.contains("on")) { show("guide"); }
+  const target = document.getElementById(id);
+  if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+  document.querySelectorAll(".guide-toc .toc-link").forEach((b) => b.classList.toggle("active", b.dataset.scroll === id));
+}));
 
 // ---------- Overview ----------
 async function loadOverview() {

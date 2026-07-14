@@ -38,6 +38,40 @@
     .verdict-tag { font-size:10px; text-transform:uppercase; letter-spacing:.06em; padding:1px 7px; border-radius:99px; }
     .verdict-confirmed { color:var(--sev-critical); background:color-mix(in srgb,var(--sev-critical) 12%,transparent); }
     .verdict-false_positive { color:var(--ok); background:color-mix(in srgb,var(--ok) 12%,transparent); }
+
+    /* ---------- Guide ---------- */
+    .guide-layout { display:grid; grid-template-columns: 220px minmax(0,1fr); gap: calc(var(--u)*4); align-items:start; }
+    @media (max-width:1000px) { .guide-layout { grid-template-columns: 1fr; } .guide-toc { position:static; max-height:none; } }
+    .guide-toc { position:sticky; top: calc(var(--u)*2); background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding: calc(var(--u)*1.5) calc(var(--u)*0.5); max-height: calc(100vh - 90px); overflow:auto; }
+    .guide-toc .toc-label { font-size:9.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--ink-faint); padding: calc(var(--u)*1.5) calc(var(--u)*2) 4px; }
+    .guide-toc button.toc-link { display:block; width:100%; text-align:left; background:none; border:none; font:inherit; font-size:12px; color:var(--ink-muted); padding:5px calc(var(--u)*2); border-radius:4px; cursor:pointer; }
+    .guide-toc button.toc-link:hover { background:var(--surface-2); color:var(--ink); }
+    .guide-toc button.toc-link.active { background:var(--accent-soft); color:var(--ink); font-weight:600; }
+    .guide-content { display:grid; gap: calc(var(--u)*5); max-width: 920px; }
+    .guide-sec h2 { font-size:19px; margin: 0 0 4px; scroll-margin-top: 20px; letter-spacing:-.01em; }
+    .guide-sec h3 { font-size:14px; margin: calc(var(--u)*3.5) 0 6px; color:var(--ink); }
+    .guide-sec > .g-kicker { font-size:10px; letter-spacing:.09em; text-transform:uppercase; color:var(--accent); font-weight:700; margin-bottom:4px; }
+    .guide-sec p { margin:0 0 10px; color:var(--ink-muted); line-height:1.65; font-size:13px; max-width:74ch; }
+    .guide-sec p.lede { font-size:14px; color:var(--ink); max-width:80ch; }
+    .guide-sec ul, .guide-sec ol { margin:0 0 12px; padding-left:20px; color:var(--ink-muted); font-size:13px; line-height:1.75; max-width:74ch; }
+    .guide-sec li { margin-bottom:3px; }
+    .guide-sec b { color:var(--ink); font-weight:600; }
+    .guide-sec code { font-family:var(--font-mono); font-size:11.5px; background:var(--surface-2); border-radius:4px; padding:1px 5px; }
+    .field-table { width:100%; border-collapse:collapse; font-size:12.5px; }
+    .field-table th { text-align:left; font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-faint); font-weight:600; padding:8px 12px; border-bottom:1px solid var(--line); }
+    .field-table td { padding:9px 12px; border-bottom:1px solid var(--line); vertical-align:top; color:var(--ink-muted); line-height:1.5; }
+    .field-table td:first-child { color:var(--ink); font-weight:600; white-space:nowrap; }
+    .field-table tr:last-child td { border-bottom:none; }
+    .callout { border:1px dashed var(--line); border-radius:var(--radius); padding: calc(var(--u)*2.4) calc(var(--u)*2.8); font-size:12.5px; color:var(--ink-muted); max-width:74ch; }
+    .callout.warn { border-color: color-mix(in srgb, var(--sev-high) 45%, var(--line)); background: color-mix(in srgb, var(--sev-high) 6%, transparent); }
+    .callout b { color:var(--ink); }
+    .steps { display:grid; gap:14px; max-width:74ch; }
+    .step { display:flex; gap:12px; align-items:flex-start; }
+    .step-num { flex:none; width:22px; height:22px; border-radius:50%; background:var(--accent-soft); color:var(--accent); display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; margin-top:1px; }
+    .step-body b { display:block; color:var(--ink); font-weight:600; margin-bottom:2px; font-size:13px; }
+    .step-body p { margin:0; }
+    .open-page { margin-top:10px; }
+    .example-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin: 6px 0 12px; }
   </style>
 </head>
 <body>
@@ -69,6 +103,7 @@
       <button class="nav-item" type="button" data-nav="evals"><span class="nav-ico">✓</span>Evals</button>
     </div>
     <div class="rail-foot">
+      <button class="nav-item" type="button" data-nav="guide"><span class="nav-ico">ℹ</span>User Guide</button>
       <button class="nav-item" type="button" data-nav="appearance"><span class="nav-ico">⚙</span>Settings</button>
     </div>
   </nav>
@@ -241,6 +276,370 @@
             <div class="card"><div class="card-head"><span class="card-title">Connection</span></div>
               <div class="set-row"><div class="set-desc" id="connInfo" style="max-width:none">Read-only dashboard querying ClickHouse server-side. All data on this page is live from your deployment.</div></div></div>
             <div class="note">Every color and size here manipulates CSS custom properties — the three-layer token architecture from docs/08-ui-design-spec.md.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- USER GUIDE -->
+      <section class="view" id="view-guide">
+        <div class="page-head"><h1 class="page-title">User Guide</h1><span class="page-sub">what Argus does, and how to use every page</span></div>
+        <div class="guide-layout">
+          <nav class="guide-toc" aria-label="Guide contents">
+            <div class="toc-label">Start here</div>
+            <button class="toc-link" data-scroll="g-about">Overview</button>
+            <button class="toc-link" data-scroll="g-concepts">Core concepts</button>
+            <button class="toc-link" data-scroll="g-start">Quick start</button>
+            <button class="toc-link" data-scroll="g-globalnav">Global controls</button>
+            <div class="toc-label">Security pages</div>
+            <button class="toc-link" data-scroll="g-threat">Threat Center</button>
+            <button class="toc-link" data-scroll="g-incidents">Incidents</button>
+            <button class="toc-link" data-scroll="g-review">Review Queue</button>
+            <button class="toc-link" data-scroll="g-redteam">Red Team</button>
+            <div class="toc-label">Observability pages</div>
+            <button class="toc-link" data-scroll="g-ovpage">Overview page</button>
+            <button class="toc-link" data-scroll="g-traces">Traces</button>
+            <button class="toc-link" data-scroll="g-tracedetail">Trace detail</button>
+            <button class="toc-link" data-scroll="g-sessions">Sessions</button>
+            <button class="toc-link" data-scroll="g-analytics">Analytics</button>
+            <div class="toc-label">Engineering pages</div>
+            <button class="toc-link" data-scroll="g-prompts">Prompts</button>
+            <button class="toc-link" data-scroll="g-evals">Evals</button>
+            <div class="toc-label">Configuration</div>
+            <button class="toc-link" data-scroll="g-appearance">Appearance settings</button>
+            <button class="toc-link" data-scroll="g-admin">Connecting &amp; admin config</button>
+            <div class="toc-label">Help</div>
+            <button class="toc-link" data-scroll="g-faq">FAQ</button>
+          </nav>
+
+          <div class="guide-content">
+
+            <article class="guide-sec" id="g-about">
+              <div class="g-kicker">Overview</div>
+              <h2>What Argus does</h2>
+              <p class="lede">Argus is an AI observability platform with security built in from the ground up. It records every trace your LLM application produces — every prompt, tool call, retrieved document, and model response — the same way a conventional observability tool (like Langfuse or Datadog) would. On top of that, every piece of content that flows through your application is analyzed by a layered detection pipeline that looks for prompt injection, jailbreaks, data exfiltration, and other attacks that are unique to LLM applications.</p>
+              <p>The core idea: most security tools only look at a single message in isolation. Argus looks at the <b>whole trace</b> — what your agent read, what it did next, and whether its behavior changed after reading untrusted content. That's what makes it possible to catch <b>indirect prompt injection</b>: an attack where instructions are hidden inside a document, web page, or tool result rather than typed by the end user.</p>
+              <h3>What you can use it for</h3>
+              <ul>
+                <li><b>Debugging &amp; performance</b> — see exactly what your agent did on any request: every span, every tool call, every token, every dollar spent, and how long each step took.</li>
+                <li><b>Threat detection</b> — get alerted when a user or a piece of retrieved content tries to hijack your agent, exfiltrate data, or bypass your system prompt.</li>
+                <li><b>Incident response</b> — when something goes wrong, open the trace, see the taint-tinted waterfall, and find the exact span and evidence that explains what happened.</li>
+                <li><b>Analyst triage</b> — work through the Review Queue, confirm or dismiss flagged events, and keep a clean record of what's a real attack versus noise.</li>
+                <li><b>Cost &amp; usage tracking</b> — see spend and token usage broken down by model, provider, and environment.</li>
+                <li><b>Compliance evidence</b> — because full, untruncated content is stored for every observation (not just previews), you have a complete audit trail to show what your AI system actually did.</li>
+              </ul>
+              <div class="callout"><b>Who this is for:</b> AI/platform engineers who want full observability into their LLM app, and security engineers who need AI-specific threat detection — without stitching two separate tools together.</div>
+            </article>
+
+            <article class="guide-sec" id="g-concepts">
+              <h2>Core concepts</h2>
+              <p>A few terms appear throughout the app. Understanding them makes every page easier to read.</p>
+
+              <h3>Traces, spans &amp; observations</h3>
+              <p>A <b>trace</b> is one end-to-end run of your application — for example, one user turn in a chat, or one agent task. A trace is made up of <b>observations</b> (also called <b>spans</b>): individual steps like a model call, a document retrieval, or a tool invocation. Argus reconstructs the full sequence and timing of these steps for every trace.</p>
+              <table class="field-table">
+                <tr><th>Span type</th><th>Icon</th><th>Meaning</th></tr>
+                <tr><td>generation</td><td><span class="tico g" style="display:inline-flex">G</span></td><td>A call to a language model (prompt in, completion out).</td></tr>
+                <tr><td>retrieval</td><td><span class="tico r" style="display:inline-flex">R</span></td><td>A document or chunk fetched from a knowledge base, search index, or the web.</td></tr>
+                <tr><td>tool</td><td><span class="tico" style="display:inline-flex">T</span></td><td>A function/tool call the agent made (e.g. <code>send_email</code>, <code>get_customer_profile</code>).</td></tr>
+                <tr><td>span</td><td><span class="tico" style="display:inline-flex">S</span></td><td>A generic step, such as the overall request handler.</td></tr>
+                <tr><td>event</td><td><span class="tico" style="display:inline-flex">E</span></td><td>A point-in-time marker with no duration.</td></tr>
+              </table>
+
+              <h3>Taint — trust classification</h3>
+              <p>Every span is automatically classified by how trustworthy its content is. This is the foundation of indirect-injection detection: an instruction is only dangerous if it comes from somewhere the model shouldn't blindly obey.</p>
+              <table class="field-table">
+                <tr><th>Taint class</th><th>Assigned to</th></tr>
+                <tr><td>system</td><td>Your system prompt / developer instructions — fully trusted.</td></tr>
+                <tr><td>user</td><td>Text typed by the end user.</td></tr>
+                <tr><td>untrusted_external</td><td><b>Retrieval and tool spans, by default.</b> Anything fetched from outside your app — documents, search results, emails, web pages, other tools — is treated as untrusted unless explicitly marked otherwise.</td></tr>
+                <tr><td>model</td><td>Text generated by the model itself (a completion).</td></tr>
+              </table>
+              <p>In the trace waterfall (see <button class="toc-link" style="display:inline;padding:0;color:var(--accent);text-decoration:underline" data-scroll="g-tracedetail">Trace detail</button> below), spans tainted <code>untrusted_external</code> are washed orange, and any span downstream of one is marked <b>taint-influenced</b> — meaning it may have been affected by content your app didn't fully control.</p>
+
+              <h3>Detection layers (L1–L4)</h3>
+              <p>Every trace is scanned by up to four layers, each cheaper and more targeted than the last:</p>
+              <table class="field-table">
+                <tr><th>Layer</th><th>What it checks</th><th>Runs on</th></tr>
+                <tr><td>L1 — Heuristics</td><td>Regex &amp; structural rules: instruction-override phrases, obfuscated/invisible characters, exfiltration patterns.</td><td>100% of content, in microseconds.</td></tr>
+                <tr><td>L2 — Classifiers</td><td>Machine-learning models that score text for injection/jailbreak likelihood. <i>Optional — only active if enabled on your deployment.</i></td><td>Untrusted content and anything L1 flags.</td></tr>
+                <tr><td>L3 — LLM judge</td><td>A language model asked to judge whether text is trying to instruct an AI system. <i>Optional — requires a judge endpoint to be configured.</i></td><td>Only content already escalated by L1/L2.</td></tr>
+                <tr><td>L4 — Trace analysis</td><td>Looks across the <b>whole trace</b>: did untrusted content's instructions get echoed into a later tool call? Did data flow out to an unexpected destination? Did a canary token leak?</td><td>Runs once a trace is complete.</td></tr>
+              </table>
+              <div class="callout">If <b>Detection layer activity</b> on the Threat Center always shows 0 for L2 and L3, that's expected — those two layers are optional and simply aren't enabled on every deployment. L1 and L4 always run.</div>
+
+              <h3>Severity, outcome &amp; category</h3>
+              <div class="example-row">
+                <span class="pill pill-critical">critical</span><span class="pill pill-high">high</span><span class="pill pill-medium">medium</span><span class="pill pill-low">low</span><span class="pill pill-neutral">info</span>
+              </div>
+              <p><b>Severity</b> reflects how serious a finding is, from <code>info</code> up to <code>critical</code>. <b>Outcome</b> tells you what happened as a result:</p>
+              <table class="field-table">
+                <tr><th>Outcome</th><th>Meaning</th></tr>
+                <tr><td>attempted</td><td>The content looked like an attack, but there's no evidence it changed the agent's behavior.</td></tr>
+                <tr><td>succeeded</td><td>The attack appears to have worked — e.g. the agent's later actions echoed the injected instruction, or data actually flowed out.</td></tr>
+                <tr><td>blocked</td><td>The attempt was stopped before it could take effect.</td></tr>
+                <tr><td>unknown</td><td>Not enough information to say either way.</td></tr>
+              </table>
+              <p><b>Category</b> classifies the type of finding: <code>direct_injection</code>, <code>indirect_injection</code>, <code>jailbreak</code>, <code>exfiltration</code>, <code>excessive_agency</code>, <code>rag_poisoning</code>, <code>prompt_leak</code>, <code>pii_egress</code>, <code>canary_triggered</code>, and <code>obfuscation</code>.</p>
+
+              <h3>Analyst verdict</h3>
+              <p>Every event starts as <code>unreviewed</code>. When you click <b>Confirm malicious</b> or <b>False positive</b> anywhere in the app, that verdict is permanently recorded on the event. Confirmed and dismissed events disappear from the Review Queue but remain visible everywhere else, tagged with a small label:</p>
+              <div class="example-row"><span class="verdict-tag verdict-confirmed">Confirmed</span><span class="verdict-tag verdict-false_positive">False Positive</span></div>
+            </article>
+
+            <article class="guide-sec" id="g-start">
+              <h2>Quick start</h2>
+              <p class="lede">The dashboard is read-only against your data — the real setup work is making sure your application is sending traces to Argus. Here's the typical path from zero to a working dashboard.</p>
+              <div class="steps">
+                <div class="step"><div class="step-num">1</div><div class="step-body"><b>Get an API key</b><p>Your Argus deployment issues a public/secret key pair per project. Whoever operates your deployment provisions this (there's no self-service key screen in the dashboard yet). You'll authenticate ingestion requests with HTTP Basic auth using this pair.</p></div></div>
+                <div class="step"><div class="step-num">2</div><div class="step-body"><b>Point your app at the ingestion endpoint</b><p>Send traces to <code>POST /api/public/ingestion</code> (a native/Langfuse-compatible batch endpoint) or <code>POST /v1/traces</code> (OpenTelemetry GenAI-convention spans). Most existing OTel or Langfuse instrumentation works with little to no change.</p></div></div>
+                <div class="step"><div class="step-num">3</div><div class="step-body"><b>Let taint classification happen automatically</b><p>You don't need to tag anything manually — retrieval and tool spans are treated as untrusted by default. If a specific tool is actually safe (e.g. an internal calculator), your admin can add a tool override so it isn't treated as an attack surface.</p></div></div>
+                <div class="step"><div class="step-num">4</div><div class="step-body"><b>Watch the Overview page</b><p>Once traces start arriving, <button class="toc-link" style="display:inline;padding:0;color:var(--accent);text-decoration:underline" data-scroll="g-ovpage">Overview</button> fills in with real counts — traces, spans, tokens, cost, and any security events found.</p></div></div>
+                <div class="step"><div class="step-num">5</div><div class="step-body"><b>Triage anything flagged</b><p>Open <button class="toc-link" style="display:inline;padding:0;color:var(--accent);text-decoration:underline" data-scroll="g-threat">Threat Center</button> to see the live attack feed, or <button class="toc-link" style="display:inline;padding:0;color:var(--accent);text-decoration:underline" data-scroll="g-review">Review Queue</button> to work through unreviewed events one at a time and record a verdict.</p></div></div>
+                <div class="step"><div class="step-num">6</div><div class="step-body"><b>Investigate a specific incident</b><p>Click any event or trace ID to open <button class="toc-link" style="display:inline;padding:0;color:var(--accent);text-decoration:underline" data-scroll="g-tracedetail">Trace detail</button> — the taint-tinted waterfall shows exactly which span introduced untrusted content and what happened afterward.</p></div></div>
+              </div>
+            </article>
+
+            <article class="guide-sec" id="g-globalnav">
+              <h2>Global controls</h2>
+              <p>These controls appear on every page, in the top bar and left rail.</p>
+              <table class="field-table">
+                <tr><th>Control</th><th>What it does</th></tr>
+                <tr><td>Project selector</td><td>Shows the current project name (e.g. <code>checkout-copilot</code>). Currently a display-only label — this deployment shows a single project. Switching between multiple projects is planned.</td></tr>
+                <tr><td>Env selector</td><td>Shows the current environment (e.g. <code>production</code>). Also display-only today.</td></tr>
+                <tr><td>Range menu</td><td>Click to choose <b>All time</b>, <b>Last 24 hours</b>, <b>Last 7 days</b>, or <b>Last 30 days</b>. This filters every KPI, chart, and table on the page you're viewing — the filter is applied to the underlying data, not just what's displayed. Changing it automatically reloads the current page.</td></tr>
+                <tr><td>↻ Refresh</td><td>Re-runs the queries for whichever page you're currently on, without changing your filters. Use it after taking an action (like confirming an event) to see the latest state, or just to pull in newly-arrived traces.</td></tr>
+                <tr><td>Avatar (top right)</td><td>Placeholder for the signed-in user. Authentication isn't wired up in this build — the dashboard is currently unauthenticated.</td></tr>
+                <tr><td>Left rail navigation</td><td>Every page in the app. Grouped into Security, Observability, Engineering, plus this User Guide and Settings at the bottom.</td></tr>
+                <tr><td>Nav badges</td><td>Small numbers next to <b>Threat Center</b> (count of critical events) and <b>Review Queue</b> (count of unreviewed events). These populate once you've opened that page at least once in your session.</td></tr>
+              </table>
+              <div class="callout"><b>Note:</b> the banner that appears just under the top bar (in red) means a query to the database failed — usually a temporary connectivity issue. Click Refresh to retry.</div>
+            </article>
+
+            <article class="guide-sec" id="g-ovpage">
+              <h2>Overview page</h2>
+              <p>Your landing page and the fastest way to answer "is everything okay?" It combines security posture and observability traffic in one glance.</p>
+              <h3>What's on it</h3>
+              <table class="field-table">
+                <tr><th>Element</th><th>Meaning</th></tr>
+                <tr><td>Security events tile</td><td>Total security findings in the selected range, with how many succeeded.</td></tr>
+                <tr><td>Critical tile</td><td>Count of critical-severity events; turns red when &gt; 0. Subtext shows how many are still unreviewed.</td></tr>
+                <tr><td>Injections tile</td><td>Direct + indirect injection events combined; subtext isolates the indirect count (the harder-to-catch kind).</td></tr>
+                <tr><td>Exfiltration tile</td><td>Events classified as data leaving your system inappropriately.</td></tr>
+                <tr><td>Jailbreaks tile</td><td>Events where someone tried to override your model's behavior/guardrails directly.</td></tr>
+                <tr><td>Unreviewed tile</td><td>Events with no analyst verdict yet — this number matches the Review Queue.</td></tr>
+                <tr><td>Traces tile</td><td>Total traces ingested; subtext shows unique sessions.</td></tr>
+                <tr><td>Spans tile</td><td>Total observations across all traces; subtext isolates model-generation spans.</td></tr>
+                <tr><td>Tokens / Cost tiles</td><td>Aggregate token usage and spend across all generation spans.</td></tr>
+                <tr><td>Users tile</td><td>Unique end users seen, if your app reports a user ID.</td></tr>
+                <tr><td>Taint coverage tile</td><td>Percentage of tool/retrieval spans that are classified untrusted — a proxy for how much of your traffic touches external content Argus is actively watching.</td></tr>
+                <tr><td>Security posture panel</td><td>Bar breakdown of succeeded vs. blocked outcomes and critical/high/canary counts, at a glance.</td></tr>
+                <tr><td>Traffic panel</td><td>Bar breakdown of generations, tool/retrieval spans, untrusted spans, and sessions.</td></tr>
+              </table>
+              <button class="btn btn-primary open-page" type="button" data-nav="overview">Open Overview →</button>
+            </article>
+
+            <article class="guide-sec" id="g-threat">
+              <h2>Threat Center</h2>
+              <p>The security nerve center. Everything here is about <b>what's attacking your application right now</b> — the live feed of every finding, plus a look at how the detection pipeline itself is performing.</p>
+              <h3>KPI row</h3>
+              <p>Same shape as Overview's security tiles (Security events, Critical, Injections, Exfiltration), plus two Threat-Center–specific tiles: <b>Canary triggers</b> (a registered secret token was found somewhere it shouldn't be — the strongest possible signal of a real leak) and <b>Taint coverage</b>.</p>
+              <h3>Attack feed</h3>
+              <p>A live, most-recent-first table of every security event. <b>Click any row</b> to expand it and see the full evidence and take action:</p>
+              <table class="field-table">
+                <tr><th>Column / element</th><th>What it shows</th></tr>
+                <tr><td>Colored stripe</td><td>Matches the row's severity color — scan the left edge of the table to spot critical rows fast.</td></tr>
+                <tr><td>Sev</td><td>Severity pill.</td></tr>
+                <tr><td>Category</td><td>The finding type; a verdict tag appears here once you've reviewed it.</td></tr>
+                <tr><td>Outcome</td><td>attempted / succeeded / blocked / unknown pill.</td></tr>
+                <tr><td>Layers</td><td>Small chips showing which detection layer(s) contributed: L1 rule IDs, an <code>L2 0.xx</code> confidence score, <code>L3</code> if the judge weighed in, and named L4 signals like <code>exfil_flow</code> or <code>instruction_echo</code>.</td></tr>
+                <tr><td>Trace</td><td>Clicking the trace ID link opens that trace directly (see Trace detail).</td></tr>
+                <tr><td>When</td><td>Relative time since detection.</td></tr>
+                <tr><td>Expanded row → Evidence</td><td>The actual matched text/content that triggered the finding.</td></tr>
+                <tr><td>Expanded row → Provenance</td><td>The raw score, which L1 rules fired, L2/L3 output, and which L4 signals were present — the full "why did this get flagged" record.</td></tr>
+                <tr><td><b>Open trace</b> button</td><td>Jumps to the full trace waterfall for deeper investigation.</td></tr>
+                <tr><td><b>Confirm malicious</b> button</td><td>Records your verdict as <code>confirmed</code>. Use this when you've verified it's a real attack.</td></tr>
+                <tr><td><b>False positive</b> button</td><td>Records your verdict as <code>false_positive</code>. Use this when the detection was wrong (e.g. a benign document that happened to match a rule).</td></tr>
+              </table>
+              <h3>Detection layer activity</h3>
+              <p>Shows how many of the events in your selected range each layer contributed to. A single event can involve more than one layer, so these numbers won't sum to the total event count.</p>
+              <h3>Escalation funnel</h3>
+              <p>The pipeline's volume at each stage: total spans scanned → how many L1 flagged → how many escalated to L2 → how many were judged by L3 → how many actual events were raised. A healthy pipeline narrows sharply — most content is clean and gets filtered out early.</p>
+              <h3>Most-targeted surfaces</h3>
+              <p>Which specific tools or retrieval sources are producing the most security events — useful for spotting a single poisoned knowledge-base source or a consistently abused tool.</p>
+              <h3>By severity / By category</h3>
+              <p>Simple distribution bars so you can see the shape of your threat landscape at a glance.</p>
+              <h3>Events over time</h3>
+              <p>A stacked hourly chart split into three lanes: indirect injection (the most dangerous class), direct injection/jailbreak attempts, and output-side findings like PII egress. Use it to spot spikes or a sustained campaign.</p>
+              <button class="btn btn-primary open-page" type="button" data-nav="threat">Open Threat Center →</button>
+            </article>
+
+            <article class="guide-sec" id="g-incidents">
+              <h2>Incidents</h2>
+              <p>Threat Center shows individual events; Incidents groups them into something you can act on.</p>
+              <h3>Recurring / poisoned sources</h3>
+              <p>Groups events by the <b>content hash</b> of the source material, so if the exact same document or web page triggers findings across <i>multiple different traces</i>, it surfaces here as one row instead of many scattered alerts. This is how you catch a single poisoned document in your knowledge base before it affects more users. These rows are informational (not clickable) since a hash spans many traces — use the categories and evidence shown to identify the source and remove it.</p>
+              <h3>Trace incidents</h3>
+              <p>Every trace that contains at least one high or critical event, most severe first. Each card shows the categories involved and a snippet of evidence. <b>Click a card</b> to open that trace directly.</p>
+              <button class="btn btn-primary open-page" type="button" data-nav="incidents">Open Incidents →</button>
+            </article>
+
+            <article class="guide-sec" id="g-review">
+              <h2>Review Queue</h2>
+              <p>Your working queue: every event that still needs a human verdict, highest severity first. The goal is to empty this queue regularly, so nothing sits unreviewed.</p>
+              <table class="field-table">
+                <tr><th>Column</th><th>Meaning</th></tr>
+                <tr><td>Sev / Category</td><td>Same as the attack feed.</td></tr>
+                <tr><td>Evidence</td><td>A preview of the matched content, so you often don't need to open the trace to make a call.</td></tr>
+                <tr><td>Trace</td><td>Click to open the full trace for more context.</td></tr>
+                <tr><td><b>Confirm</b> / <b>Dismiss</b></td><td>Same verdict actions as Threat Center, in compact form. As soon as you click one, that row disappears from the queue (it's been reviewed) and the badge count on the left rail updates.</td></tr>
+              </table>
+              <p>When the queue is empty, you'll see a "Queue clear" message — that's the goal state.</p>
+              <button class="btn btn-primary open-page" type="button" data-nav="review">Open Review Queue →</button>
+            </article>
+
+            <article class="guide-sec" id="g-redteam">
+              <h2>Red Team</h2>
+              <p>Reserved for scheduled, automated attack simulations — running probe suites (like garak or promptfoo) against your application on a schedule and tracking how your attack-success-rate changes over time as you harden your app. This page is currently empty in every deployment; it's a roadmap item. When runs are configured, they'll appear here as scored traces.</p>
+              <button class="btn open-page" type="button" data-nav="redteam">Open Red Team →</button>
+            </article>
+
+            <article class="guide-sec" id="g-traces">
+              <h2>Traces</h2>
+              <p>Every trace ingested, most recent first — your general-purpose observability list, independent of whether anything security-related happened.</p>
+              <table class="field-table">
+                <tr><th>Column</th><th>Meaning</th></tr>
+                <tr><td>Trace</td><td>The trace ID. Click any row to open its detail view.</td></tr>
+                <tr><td>Name / Env</td><td>The trace's name (e.g. an endpoint or task name) and environment tag.</td></tr>
+                <tr><td>Spans</td><td>Number of observations in the trace.</td></tr>
+                <tr><td>Tokens / Cost</td><td>Summed across all generation spans in the trace.</td></tr>
+                <tr><td>Latency</td><td>Wall-clock time from the first span's start to the last span's end.</td></tr>
+                <tr><td>Security</td><td>If any events exist on this trace, shows the highest severity and event count; otherwise a dash.</td></tr>
+                <tr><td>When</td><td>Relative time since the trace started.</td></tr>
+              </table>
+              <button class="btn btn-primary open-page" type="button" data-nav="traces">Open Traces →</button>
+            </article>
+
+            <article class="guide-sec" id="g-tracedetail">
+              <h2>Trace detail</h2>
+              <p>The deepest view in the app — reconstructs one trace's full execution as a waterfall, with a side panel to inspect any individual span. You land here by clicking a trace ID anywhere in the app; the <b>← Back</b> button returns you to wherever you came from.</p>
+              <h3>The waterfall</h3>
+              <p>One row per span, ordered by start time, with a horizontal bar positioned and sized to scale against the trace's total duration. Row and bar coloring tell the security story at a glance:</p>
+              <table class="field-table">
+                <tr><th>Visual</th><th>Meaning</th></tr>
+                <tr><td><span class="sw" style="background:var(--taint-wash);border:1px solid var(--sev-high)"></span> Orange wash + left border</td><td>This span <b>is</b> the untrusted source — e.g. a document retrieval or tool result classified as <code>untrusted_external</code>.</td></tr>
+                <tr><td><span class="sw" style="background:var(--taint-influenced);border:1px solid var(--line)"></span> Faint orange wash</td><td><b>Taint-influenced</b> — this span happened after untrusted content entered the trace, so it may have been affected by it.</td></tr>
+                <tr><td><span class="sw" style="background:var(--canary-wash);border:1px solid var(--sev-critical)"></span> Red wash + left border</td><td>This exact span has a <b>high or critical</b> security finding attached — the strongest visual flag, and it overrides the other two.</td></tr>
+                <tr><td>Bar color: teal</td><td>Normal — no security finding on this span.</td></tr>
+                <tr><td>Bar color: orange</td><td>This span has a high-severity finding.</td></tr>
+                <tr><td>Bar color: red</td><td>This span has a critical finding.</td></tr>
+                <tr><td>Chips next to the span name</td><td>Up to two L4 signal names (e.g. <code>exfil_flow</code>, <code>instruction_echo</code>) found on that span.</td></tr>
+              </table>
+              <p>The taint legend beneath the waterfall recaps these three washes. <b>Click any row</b> to load it into the drawer on the right — the most severe span is auto-selected the moment you open a trace, so the most important thing to look at is already in front of you.</p>
+              <h3>Span drawer (right panel)</h3>
+              <p>Four tabs, once you've selected a span:</p>
+              <table class="field-table">
+                <tr><th>Tab</th><th>Shows</th></tr>
+                <tr><td>Security</td><td>Every security event on this specific span — severity, category, outcome, evidence, score, and which rules/signals fired — with <b>Confirm</b> / <b>False positive</b> buttons for each one. The tab label shows a count when events exist.</td></tr>
+                <tr><td>Input</td><td>The full input payload — the prompt sent to a model, or the arguments passed to a tool — rendered as plain, non-executing text (safe to view even if it contains an attack payload).</td></tr>
+                <tr><td>Output</td><td>The full output payload — a model's completion, a tool's result, or a retrieved document's content.</td></tr>
+                <tr><td>Attributes</td><td>Structured metadata: span type, taint class, taint source, model, provider, token counts, cost, finish reason, and any additional attributes recorded by your instrumentation.</td></tr>
+              </table>
+              <div class="callout"><b>Why this is safe to browse:</b> everything in the Input/Output tabs is rendered strictly as text — never executed or interpreted as HTML — so even a document containing a prompt-injection or script payload can never affect your browser. Argus is designed to store and display attack content without becoming vulnerable to it.</div>
+              <button class="btn open-page" type="button" data-nav="traces">Open Traces to try it →</button>
+            </article>
+
+            <article class="guide-sec" id="g-sessions">
+              <h2>Sessions</h2>
+              <p>Rolls traces up by session — useful for multi-turn conversations where you want to see a whole conversation's footprint rather than one request at a time.</p>
+              <table class="field-table">
+                <tr><th>Column</th><th>Meaning</th></tr>
+                <tr><td>Session / User</td><td>The session and (if reported) end-user identifier.</td></tr>
+                <tr><td>Traces</td><td>How many traces belong to this session.</td></tr>
+                <tr><td>Spans / Tokens / Cost</td><td>Summed across every trace in the session.</td></tr>
+                <tr><td>Security</td><td>Highest severity and event count across the whole session, if any.</td></tr>
+                <tr><td>Last seen</td><td>Most recent activity in this session.</td></tr>
+              </table>
+              <p>Rows aren't clickable yet — drilling from a session into its individual traces is planned. For now, open the trace directly from Traces or the attack feed.</p>
+              <button class="btn open-page" type="button" data-nav="sessions">Open Sessions →</button>
+            </article>
+
+            <article class="guide-sec" id="g-analytics">
+              <h2>Analytics</h2>
+              <p>Cost, usage, and performance — the "how is my AI app running" view, independent of security.</p>
+              <table class="field-table">
+                <tr><th>Element</th><th>Meaning</th></tr>
+                <tr><td>KPI tiles</td><td>Observations, total cost, total tokens, input/output token split, average latency, and p95 latency (95th-percentile — a better "worst realistic case" number than an average).</td></tr>
+                <tr><td>Cost over time chart</td><td>Hourly spend on generation spans — spot cost spikes or a runaway loop.</td></tr>
+                <tr><td>Cost &amp; tokens by model table</td><td>Every model in use, with call count, input/output tokens, total cost, and average latency — the fastest way to see which model is expensive or slow.</td></tr>
+                <tr><td>Observations by type</td><td>Distribution across generation / tool / retrieval / span / event.</td></tr>
+                <tr><td>By provider</td><td>Distribution by model provider (e.g. openai, anthropic), if your instrumentation reports it.</td></tr>
+                <tr><td>By environment</td><td>Distribution across environments like production/staging, from your traces' environment tag.</td></tr>
+              </table>
+              <button class="btn btn-primary open-page" type="button" data-nav="analytics">Open Analytics →</button>
+            </article>
+
+            <article class="guide-sec" id="g-prompts">
+              <h2>Prompts</h2>
+              <p>Reserved for versioned prompt management — storing your system/user prompt templates with labels (e.g. <code>production</code>, <code>staging</code>) and diffing changes over time. No prompts have been registered on this deployment yet; this is a roadmap feature (Phase 3). Once your app registers prompts through the prompts API, they'll appear here.</p>
+              <button class="btn open-page" type="button" data-nav="prompts">Open Prompts →</button>
+            </article>
+
+            <article class="guide-sec" id="g-evals">
+              <h2>Evals</h2>
+              <p>Aggregates any <b>scores</b> recorded against your traces — whether from an LLM-as-judge evaluation or human annotation. Each row is one score name (e.g. <code>helpfulness</code>, <code>sec.injection_risk</code>) with its count, average, min, and max across all recorded values. If this is empty, no scores have been submitted yet — they populate as your eval pipeline or annotators write to the scores API.</p>
+              <button class="btn open-page" type="button" data-nav="evals">Open Evals →</button>
+            </article>
+
+            <article class="guide-sec" id="g-appearance">
+              <h2>Settings — Appearance</h2>
+              <p>Personal display preferences. Every change here applies instantly across the whole app, because the UI is built entirely on CSS custom properties (design tokens) — nothing is hardcoded.</p>
+              <table class="field-table">
+                <tr><th>Control</th><th>Options &amp; effect</th></tr>
+                <tr><td>Theme</td><td><b>System</b> (follows your OS light/dark setting, the default), <b>Light</b>, or <b>Dark</b> — forces a specific theme regardless of your OS.</td></tr>
+                <tr><td>Accent</td><td>Four color choices (Radar teal, Indigo, Ember, Steel) for interactive elements — links, buttons, highlights. This is purely cosmetic: <b>severity colors are always fixed</b> (critical is always red-ish, high is always orange), so an alert reads the same no matter your accent choice.</td></tr>
+                <tr><td>Density</td><td><b>Comfortable</b> (default) or <b>Compact</b>, which tightens spacing to fit roughly 30% more rows on screen — useful when triaging a long attack feed.</td></tr>
+                <tr><td>Corner radius</td><td><b>0</b> (square, terminal-like), <b>6</b> (default), or <b>10</b> (soft) — controls the roundedness of cards, buttons, and pills throughout the app.</td></tr>
+              </table>
+              <div class="callout warn"><b>Not saved yet:</b> appearance choices apply immediately to your current browser tab, but reset to the defaults on reload. Per-user persistence is planned but not implemented in this build.</div>
+              <button class="btn open-page" type="button" data-nav="appearance">Open Settings →</button>
+            </article>
+
+            <article class="guide-sec" id="g-admin">
+              <h2>Connecting your app &amp; admin configuration</h2>
+              <p>These are configured by whoever operates your Argus deployment, not from within the dashboard itself — included here so you understand where the data and detections actually come from.</p>
+              <h3>Sending data in</h3>
+              <ul>
+                <li><b>Native batch endpoint</b> — <code>POST /api/public/ingestion</code>, authenticated with HTTP Basic auth using your project's public/secret API key pair. Compatible with Langfuse-style batch payloads.</li>
+                <li><b>OpenTelemetry endpoint</b> — <code>POST /v1/traces</code>, accepting standard OTel spans using GenAI semantic-convention attributes. If you already instrument your app with OpenTelemetry, this usually requires little to no change.</li>
+              </ul>
+              <h3>Taint overrides</h3>
+              <p>By default every retrieval/tool span is treated as untrusted. If a specific tool is actually internal and safe (e.g. a calculator or your own database), an admin can add a tool override in the project's detection configuration so it's no longer treated as an attack surface — reducing false positives.</p>
+              <h3>Alerting</h3>
+              <p>When an event crosses a configured severity threshold, a webhook notification can fire to Slack, PagerDuty, or any endpoint. The destination URL and minimum severity are set by an admin at deploy time; there's no in-app control for this yet.</p>
+              <h3>Detection tuning</h3>
+              <p>The specific rules (L1), whether classifiers/judge (L2/L3) are enabled, and severity thresholds are configured per project by whoever operates the deployment. If a rule is producing too many false positives, that's tuned at the deployment level, not per-analyst — use <b>False positive</b> verdicts in the meantime to keep your own view accurate; those verdicts are recorded for future tuning.</p>
+              <h3>Data retention</h3>
+              <p>Argus stores full, untruncated input/output content for every observation (not just a preview) specifically so that historical traffic can be re-analyzed as detection improves, and so investigations have complete evidence. How long that data is kept is a retention setting controlled by whoever operates your deployment.</p>
+            </article>
+
+            <article class="guide-sec" id="g-faq">
+              <h2>FAQ</h2>
+              <h3>I don't see any data anywhere.</h3>
+              <p>Either no traces have been ingested yet, or your selected time Range is excluding them. Try switching Range to <b>All time</b> first, and confirm your application is actually sending data to the ingestion endpoint.</p>
+              <h3>Detection layer activity always shows 0 for L2 and L3.</h3>
+              <p>Expected on most deployments — those two layers are optional. L1 heuristics and L4 trace analysis always run and are usually sufficient to catch the events you'll see in the feed.</p>
+              <h3>What exactly happens when I click Confirm / False positive?</h3>
+              <p>Your verdict is permanently recorded on that event. It's removed from the Review Queue (since it no longer needs review) but still visible everywhere else — attack feed, incidents, trace detail — with a small verdict tag, so nothing is hidden or deleted.</p>
+              <h3>My appearance changes disappeared after reloading.</h3>
+              <p>Expected today — see the note in Settings above. Preferences are per-tab only until persistence ships.</p>
+              <h3>Can I search for a specific trace by ID?</h3>
+              <p>Not yet from a search box — open it from any list it appears in (Traces, the attack feed, Incidents, or Review Queue). If you already know a trace ID, an admin can query it directly via the trace API.</p>
+              <h3>Is it safe to view content that contains an attack payload?</h3>
+              <p>Yes. Every piece of stored content — including anything an attacker tried to inject — is rendered strictly as plain text, never executed or interpreted as HTML. A stored prompt injection can never become a stored script in your browser.</p>
+              <h3>Why do Project and Env look like buttons but don't do anything?</h3>
+              <p>They're placeholders for multi-project/multi-environment support, which isn't wired up yet. This deployment shows a single project and environment.</p>
+            </article>
+
           </div>
         </div>
       </section>

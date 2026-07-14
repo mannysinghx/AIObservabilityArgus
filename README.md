@@ -215,6 +215,7 @@ See [docs/06-roadmap.md](docs/06-roadmap.md) for the full plan.
 | [07 — References](docs/07-references.md) | Standards, tools, papers, datasets |
 | [08 — UI Design Spec](docs/08-ui-design-spec.md) | Design system, theming/white-label, key screens |
 | [09 — Deployment](docs/09-deployment.md) | Self-host on a VM, Railway, or Kubernetes |
+| [10 — Integration Example (Node.js/Express)](docs/10-integration-example-nodejs.md) | Worked example plugging a real app (autogovern.io) into Argus, with a verified poisoned-document attack |
 | [RUNBOOK.md](RUNBOOK.md) | How to run the stack locally and reproduce the demo |
 
 ## Built on

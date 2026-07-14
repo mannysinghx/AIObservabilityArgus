@@ -85,11 +85,17 @@ def analyze(
             break
 
     # Collect imperatives + identifiers found in untrusted spans (the source of
-    # any successful indirect injection).
+    # any successful indirect injection). Side-effect tool spans (send_email,
+    # send_notification, ...) are excluded as *sources*: they're untrusted by
+    # default so their own output gets scanned, but a tool's destination
+    # address is an action the model took, not content it read — counting it
+    # here would make every outbound call match itself and manufacture a
+    # guaranteed "exfiltration" finding regardless of whether the target was
+    # ever actually seen in attacker-influenced content.
     untrusted_imperatives: list[tuple[int, str]] = []
     untrusted_identifiers: set[str] = set()
     for i, (o, t) in enumerate(zip(observations, taints)):
-        if t != TaintClass.untrusted_external:
+        if t != TaintClass.untrusted_external or _is_side_effect(o):
             continue
         for m in _IMPERATIVE.finditer(o.content or ""):
             untrusted_imperatives.append((i, m.group(0).strip()))

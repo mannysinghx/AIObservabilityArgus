@@ -64,3 +64,48 @@ def test_clean_trace_produces_nothing():
     ]
     resp = scan_trace(TraceScanRequest(trace_id="tr1", observations=obs))
     assert resp.findings == []
+
+
+def test_side_effect_tool_targeting_itself_is_not_exfiltration():
+    """Regression test: a side-effect tool (e.g. send_notification) is itself
+    tainted untrusted_external by default (so its own output gets scanned).
+    Its own destination address must not be folded into the "untrusted
+    identifiers" set and then matched against itself — every legitimate
+    outbound call would otherwise produce a guaranteed false "critical
+    exfiltration" finding, since the call always contains its own recipient.
+    Found via the autogovern.io Contract Risk Review demo: a clean retrieval
+    plus a routine internal notification produced a critical exfiltration
+    finding purely because the tool's own recipient matched itself once it
+    was (wrongly) added to the untrusted-identifier pool.
+
+    Note: a coarse `behavior_deviation` signal (any side-effect tool firing
+    downstream of any retrieval, regardless of content) is a known Phase 1
+    heuristic baseline — see the module docstring and docs/04 — and is still
+    expected to fire here. This test guards specifically against the
+    self-referential exfil_flow/critical false positive, not against
+    behavior_deviation broadly."""
+    obs = [
+        _obs("u", ObservationType.span, "Review contract 4471.", role="user"),
+        _obs(
+            "r", ObservationType.retrieval,
+            "Contracts under $50,000 require standard review.",
+            name="governance-policy-kb",
+        ),
+        _obs(
+            "g", ObservationType.generation,
+            "This contract exceeds the threshold; flagging for executive sign-off.",
+            role="assistant",
+        ),
+        _obs(
+            "notify", ObservationType.tool,
+            'to: risk-committee@autogovern.io body: "Flagged for executive review."',
+            name="send_notification",
+        ),
+    ]
+    resp = scan_trace(TraceScanRequest(trace_id="tr1", observations=obs))
+    cats = {f.category.value for f in resp.findings}
+    sevs = {f.severity.value for f in resp.findings}
+    signals = {s for f in resp.findings for s in f.l4_signals}
+    assert "exfiltration" not in cats
+    assert "critical" not in sevs
+    assert "exfil_flow" not in signals

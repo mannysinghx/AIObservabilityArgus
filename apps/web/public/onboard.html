@@ -142,7 +142,7 @@
   <section class="view-step" id="step3">
     <div class="card">
       <div class="card-head"><span class="card-title">3. Test your connection</span></div>
-      <div class="intro-note">This step just proves your API key works — it sends <b>one harmless test message</b>, nothing from your real app. Pick how you want to send it below, follow the numbered steps, then check the status underneath.</div>
+      <div class="intro-note">This step just proves your API key works — it sends <b>one harmless test message</b>, nothing from your real app. Run it from <b>any computer with internet access</b>, including this laptop — it doesn't matter if your real app lives elsewhere (Azure, AWS, a VM, Railway, Vercel, wherever). Pick how you want to send it below, follow the numbered steps, then check the status underneath.</div>
       <div class="tabs" id="snippetTabs">
         <button class="tab-btn active" data-tab="curl" type="button">Terminal (cURL)</button>
         <button class="tab-btn" data-tab="node" type="button">Node.js</button>
@@ -158,7 +158,7 @@
         <span class="lbl">Then run:</span>
         <div class="keybox"><span id="runCmdOut"></span><button class="copy-btn" data-copy="runCmdOut" type="button">Copy</button></div>
       </div>
-      <div class="next-note">This only tests the connection. Once you see "Connected" below, you're ready to add real tracing to your app — see the full <a href="/?guide=onboarding" target="_blank">step-by-step integration guide</a>.</div>
+      <div class="next-note">This only tests the connection — it doesn't touch your real app. To track your <b>actual</b> app, wherever it's deployed (Azure, AWS, a VM, Railway, Vercel, etc.), add this same kind of code into its real source and redeploy it the way you normally do — a <code>git push</code>, your platform's deploy command, or a service restart. There's no separate access to Argus required for that. See the full <a href="/?guide=onboarding" target="_blank">step-by-step integration guide</a> for exactly where the code goes.</div>
     </div>
 
     <div class="card">
@@ -179,7 +179,7 @@
           <span class="hint">Bookmark this — it filters the dashboard to only your project's traces and security events.</span>
         </div>
         <a class="btn btn-primary" id="openDashBtn" href="/" style="text-decoration:none; display:inline-block;">Open your dashboard →</a>
-        <div class="hint" style="max-width:520px;">Next: replace the test snippet with real calls in your app's code so it tracks actual usage. Full guide: <a href="/?guide=onboarding" target="_blank">the integration guide</a>.</div>
+        <div class="hint" style="max-width:520px;">Next: add this same kind of code to your <b>real</b> app's source — wherever it's actually deployed — and redeploy it as usual. No terminal access to that server is needed just for Argus. Full guide: <a href="/?guide=onboarding" target="_blank">the integration guide</a>.</div>
       </div>
     </div>
   </section>

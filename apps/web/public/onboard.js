@@ -181,16 +181,18 @@ const SNIPPETS = { curl: curlSnippet, node: nodeSnippet, python: pythonSnippet, 
 // their app. Each tab spells out exactly where it goes and how to run it.
 const HOWTO = {
   curl: [
-    "Open a terminal — <b>Terminal</b> on Mac/Linux, <b>Command Prompt</b> or <b>PowerShell</b> on Windows.",
+    "Open a terminal on <b>any computer with internet access</b> — your own laptop is fine, it doesn't need to be where your app runs. <b>Terminal</b> on Mac/Linux, <b>Command Prompt</b> or <b>PowerShell</b> on Windows.",
     "Copy the command below, paste it into the terminal, and press <b>Enter</b>.",
   ],
   node: [
+    "This runs as a quick standalone test — it doesn't need to be anywhere near your real app, your own laptop is fine.",
     "Copy the code below.",
     "Save it into a new file named <code>argus-test.js</code> (any folder is fine).",
     "Open a terminal in that same folder, then run the command underneath the code.",
     "Requires Node.js 18 or newer — check with <code>node -v</code>.",
   ],
   python: [
+    "This runs as a quick standalone test — it doesn't need to be anywhere near your real app, your own laptop is fine.",
     "Copy the code below.",
     "Save it into a new file named <code>argus_test.py</code> (any folder is fine).",
     "Open a terminal in that same folder, then run the command underneath the code.",

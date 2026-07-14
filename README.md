@@ -195,9 +195,10 @@ docs/               design docs 01–08 (vision, architecture, detection, UI spe
 - ✅ Detection quality gate with hard-negative corpus, enforced in CI
 - ✅ Webhook alerting with trace-linked payloads
 - ✅ Verified demo (poisoned → 2 correct events; benign → 0)
-- ✅ **Live dashboard** (`apps/web`) — read-only Threat Center, Traces + taint-tinted waterfall, Analytics, reading ClickHouse
-- 🔜 **Phase 2:** L3 judge, canary tokens end-to-end, pgvector self-hardening corpus, cross-trace RAG-poisoning correlation, Incidents UI
-- 🔜 **Dashboard next:** analyst actions (confirm / false-positive), saved views, dashboard builder (per [docs/08](docs/08-ui-design-spec.md))
+- ✅ **Full dashboard** (`apps/web`) — Overview, Threat Center, Incidents, Review Queue, Traces + taint-tinted waterfall, Sessions, Analytics, an in-app User Guide, and analyst verdict actions (confirm / false-positive), reading ClickHouse
+- ✅ **Self-service onboarding** (`/onboard.html`) — create a project + API key with no login, copy-paste a working snippet (cURL/Node/Python/OTLP), watch a live "connected" status flip in real time, then get a personalized dashboard link scoped to just that project's data — every dashboard query supports `?project=<id>` isolation
+- 🔜 **Phase 2:** L3 judge, canary tokens end-to-end, pgvector self-hardening corpus, cross-trace RAG-poisoning correlation
+- 🔜 **Dashboard next:** saved views, dashboard builder (per [docs/08](docs/08-ui-design-spec.md)), a clickable project switcher, rate limiting on onboarding
 - 🔜 **Phase 3+:** observability parity (prompts, evals), gateway/blocking mode, scheduled red-teaming
 
 See [docs/06-roadmap.md](docs/06-roadmap.md) for the full plan.

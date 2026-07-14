@@ -17,11 +17,21 @@ function since(range: string | undefined, col: string): string {
   return iv ? `AND ${col} >= now() - INTERVAL ${iv}` : "";
 }
 
+// Project scoping. When a client self-onboards, their personalized dashboard
+// link carries ?project=<uuid> — every query below narrows to just that
+// project so one client never sees another's traces or security events.
+// Omitted entirely => the unscoped "all projects" view (today's default).
+function scoped(projectId: string | undefined, col = "project_id"): string {
+  if (!projectId) return "";
+  const safe = projectId.replace(/[^a-zA-Z0-9_-]/g, "");
+  return safe ? `AND ${col} = '${safe}'` : "";
+}
+
 // ---------------- Overview ----------------
-export async function overview(range?: string) {
-  const se = since(range, "detected_at");
-  const ts = since(range, "timestamp");
-  const os = since(range, "start_time");
+export async function overview(range?: string, projectId?: string) {
+  const se = since(range, "detected_at") + scoped(projectId);
+  const ts = since(range, "timestamp") + scoped(projectId);
+  const os = since(range, "start_time") + scoped(projectId);
 
   const [sec] = await q(`
     SELECT count() AS total,
@@ -56,9 +66,9 @@ export async function overview(range?: string) {
 }
 
 // ---------------- Threat Center ----------------
-export async function threat(range?: string) {
-  const se = since(range, "detected_at");
-  const os = since(range, "start_time");
+export async function threat(range?: string, projectId?: string) {
+  const se = since(range, "detected_at") + scoped(projectId);
+  const os = since(range, "start_time") + scoped(projectId);
 
   const bySeverity = await q(`SELECT severity, count() AS n FROM security_events FINAL WHERE 1 ${se} GROUP BY severity ORDER BY n DESC`);
   const byCategory = await q(`SELECT category, count() AS n FROM security_events FINAL WHERE 1 ${se} GROUP BY category ORDER BY n DESC`);
@@ -93,7 +103,7 @@ export async function threat(range?: string) {
   // Most-targeted surfaces: join events to their source observation.
   const surfaces = await q(`
     SELECT o.type AS type, o.name AS name, count() AS events
-    FROM (SELECT trace_id, observation_id FROM security_events FINAL WHERE observation_id != '' ${se.replace("detected_at", "detected_at")}) se
+    FROM (SELECT trace_id, observation_id FROM security_events FINAL WHERE observation_id != '' ${se}) se
     INNER JOIN (SELECT trace_id, observation_id, type, name FROM observations FINAL) o
       ON o.trace_id = se.trace_id AND o.observation_id = se.observation_id
     GROUP BY type, name ORDER BY events DESC LIMIT 8`);
@@ -101,19 +111,19 @@ export async function threat(range?: string) {
   return { bySeverity, byCategory, byOutcome, trend, funnel, layers, surfaces };
 }
 
-export async function attackFeed(range?: string, limit = 100) {
+export async function attackFeed(range?: string, limit = 100, projectId?: string) {
   return q(`
     SELECT event_id, trace_id, observation_id, toString(detected_at) AS detected_at,
            category, severity, outcome, round(score,1) AS score,
            l1_rules, l4_signals, l2_scores, l3_verdict, evidence_excerpt,
            content_sha256, analyst_verdict
-    FROM security_events FINAL WHERE 1 ${since(range, "detected_at")}
+    FROM security_events FINAL WHERE 1 ${since(range, "detected_at")}${scoped(projectId)}
     ORDER BY detected_at DESC LIMIT ${Number(limit)}`);
 }
 
 // ---------------- Incidents (derived) ----------------
-export async function incidents(range?: string) {
-  const se = since(range, "detected_at");
+export async function incidents(range?: string, projectId?: string) {
+  const se = since(range, "detected_at") + scoped(projectId);
   // Trace-level incidents: any trace with a high/critical event.
   const traceIncidents = await q(`
     SELECT trace_id,
@@ -145,20 +155,20 @@ export async function incidents(range?: string) {
 }
 
 // ---------------- Review queue ----------------
-export async function reviewQueue(range?: string) {
+export async function reviewQueue(range?: string, projectId?: string) {
   return q(`
     SELECT event_id, trace_id, observation_id, toString(detected_at) AS detected_at,
            category, severity, outcome, round(score,1) AS score,
            l1_rules, l4_signals, evidence_excerpt
     FROM security_events FINAL
-    WHERE analyst_verdict = 'unreviewed' ${since(range, "detected_at")}
+    WHERE analyst_verdict = 'unreviewed' ${since(range, "detected_at")}${scoped(projectId)}
     ORDER BY multiIf(severity='critical',5,severity='high',4,severity='medium',3,severity='low',2,1) DESC,
              detected_at DESC LIMIT 100`);
 }
 
 // ---------------- Sessions ----------------
-export async function sessions(range?: string) {
-  const ts = since(range, "t.timestamp");
+export async function sessions(range?: string, projectId?: string) {
+  const ts = since(range, "t.timestamp") + scoped(projectId, "t.project_id");
   return q(`
     SELECT t.session_id AS session_id, t.user_id AS user_id,
            count() AS traces,
@@ -175,14 +185,14 @@ export async function sessions(range?: string) {
 }
 
 // ---------------- Traces ----------------
-export async function tracesList(range?: string, limit = 100) {
+export async function tracesList(range?: string, limit = 100, projectId?: string) {
   return q(`
     SELECT t.trace_id AS trace_id, t.name AS name, t.environment AS environment,
            toString(t.timestamp) AS timestamp, t.session_id AS session_id,
            obs.n_obs AS observations, obs.tokens AS tokens, obs.cost AS cost,
            obs.latency AS latency_ms,
            sec.n_events AS sec_events, sec.max_sev AS sec_max_severity
-    FROM (SELECT * FROM traces FINAL WHERE 1 ${since(range, "timestamp")}) t
+    FROM (SELECT * FROM traces FINAL WHERE 1 ${since(range, "timestamp")}${scoped(projectId)}) t
     LEFT JOIN (
       SELECT trace_id, count() AS n_obs, sum(input_tokens+output_tokens) AS tokens,
              sum(cost_usd) AS cost,
@@ -193,29 +203,30 @@ export async function tracesList(range?: string, limit = 100) {
     ORDER BY t.timestamp DESC LIMIT ${Number(limit)}`);
 }
 
-export async function traceDetail(traceId: string) {
+export async function traceDetail(traceId: string, projectId?: string) {
   const safe = traceId.replace(/[^a-zA-Z0-9_-]/g, "");
+  const pj = scoped(projectId);
   const [trace] = await q(`
     SELECT trace_id, name, environment, toString(timestamp) AS timestamp,
            session_id, user_id, tags, metadata
-    FROM traces FINAL WHERE trace_id='${safe}' LIMIT 1`);
+    FROM traces FINAL WHERE trace_id='${safe}' ${pj} LIMIT 1`);
   const observations = await q(`
     SELECT observation_id, parent_id, type, name,
            toString(start_time) AS start_time, toString(end_time) AS end_time,
            model, provider, input_tokens, output_tokens, round(cost_usd,6) AS cost,
            finish_reason, taint, taint_source, taint_influenced, attributes,
            substring(input_full,1,8000) AS input, substring(output_full,1,8000) AS output
-    FROM observations FINAL WHERE trace_id='${safe}' ORDER BY start_time`);
+    FROM observations FINAL WHERE trace_id='${safe}' ${pj} ORDER BY start_time`);
   const events = await q(`
     SELECT event_id, observation_id, category, severity, outcome, round(score,1) AS score,
            l1_rules, l4_signals, l2_scores, l3_verdict, evidence_excerpt, analyst_verdict
-    FROM security_events FINAL WHERE trace_id='${safe}' ORDER BY score DESC`);
+    FROM security_events FINAL WHERE trace_id='${safe}' ${pj} ORDER BY score DESC`);
   return { trace, observations, events };
 }
 
 // ---------------- Analytics ----------------
-export async function analytics(range?: string) {
-  const os = since(range, "start_time");
+export async function analytics(range?: string, projectId?: string) {
+  const os = since(range, "start_time") + scoped(projectId);
   const [totals] = await q(`
     SELECT count() AS observations, round(sum(cost_usd),4) AS cost,
            sum(input_tokens+output_tokens) AS tokens,
@@ -231,7 +242,7 @@ export async function analytics(range?: string) {
     GROUP BY model ORDER BY cost DESC`);
   const byType = await q(`SELECT type, count() AS n FROM observations FINAL WHERE 1 ${os} GROUP BY type ORDER BY n DESC`);
   const byProvider = await q(`SELECT provider, count() AS n FROM observations FINAL WHERE provider!='' ${os} GROUP BY provider ORDER BY n DESC`);
-  const byEnv = await q(`SELECT environment, count() AS n FROM traces FINAL WHERE 1 ${since(range, "timestamp")} GROUP BY environment ORDER BY n DESC`);
+  const byEnv = await q(`SELECT environment, count() AS n FROM traces FINAL WHERE 1 ${since(range, "timestamp")}${scoped(projectId)} GROUP BY environment ORDER BY n DESC`);
   const costTrend = await q(`
     SELECT toStartOfHour(start_time) AS hour, round(sum(cost_usd),5) AS cost,
            sum(input_tokens+output_tokens) AS tokens

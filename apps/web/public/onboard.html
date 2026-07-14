@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Connect your app to Argus</title>
+  <link rel="stylesheet" href="/app.css">
+  <style>
+    body { min-height: 100vh; }
+    .onb-shell { max-width: 720px; margin: 0 auto; padding: calc(var(--u)*7) calc(var(--u)*5) calc(var(--u)*10); display: grid; gap: calc(var(--u)*5); }
+    .onb-head { display: flex; align-items: center; gap: 10px; }
+    .onb-title { font-size: 22px; font-weight: 650; letter-spacing: -.01em; margin: 0; }
+    .onb-sub { color: var(--ink-muted); font-size: 13.5px; max-width: 60ch; }
+    .onb-steps { display: flex; gap: 6px; margin: 4px 0 0; }
+    .onb-step-dot { width: 26px; height: 4px; border-radius: 99px; background: var(--line); }
+    .onb-step-dot.done { background: var(--accent); }
+    .onb-step-dot.active { background: var(--accent); opacity: .5; }
+    .field { display: grid; gap: 6px; }
+    .field label { font-size: 12px; font-weight: 600; color: var(--ink); }
+    .field .hint { font-size: 11.5px; color: var(--ink-faint); }
+    .field input {
+      font: inherit; font-size: 13.5px; padding: calc(var(--u)*1.6) calc(var(--u)*2.2);
+      border: 1px solid var(--line); border-radius: var(--radius);
+      background: var(--surface); color: var(--ink);
+    }
+    .field input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .keybox {
+      display: flex; align-items: center; gap: 8px;
+      font-family: var(--font-mono); font-size: 12.5px;
+      background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius);
+      padding: calc(var(--u)*1.6) calc(var(--u)*2.2); overflow-x: auto;
+    }
+    .keybox span { flex: 1; white-space: nowrap; }
+    .copy-btn {
+      flex: none; font: inherit; font-size: 11.5px; font-weight: 600;
+      border: 1px solid var(--line); border-radius: 5px; background: var(--surface);
+      color: var(--ink-muted); padding: 3px 9px; cursor: pointer;
+    }
+    .copy-btn:hover { background: var(--surface-2); color: var(--ink); }
+    .copy-btn.copied { color: var(--ok); border-color: var(--ok); }
+    .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); }
+    .tab-btn {
+      font: inherit; font-size: 12.5px; font-weight: 600; color: var(--ink-muted);
+      background: none; border: none; border-bottom: 2px solid transparent;
+      padding: calc(var(--u)*1.6) calc(var(--u)*2.2); cursor: pointer;
+    }
+    .tab-btn.active { color: var(--ink); border-bottom-color: var(--accent); }
+    .snippet {
+      font-family: var(--font-mono); font-size: 11.5px; line-height: 1.6;
+      background: var(--surface-2); border: 1px solid var(--line); border-top: none;
+      border-radius: 0 0 var(--radius) var(--radius); padding: calc(var(--u)*2.4);
+      white-space: pre; overflow-x: auto; position: relative;
+    }
+    .snippet-wrap { position: relative; }
+    .snippet-copy { position: absolute; top: 8px; right: 8px; }
+    .status-row { display: flex; align-items: center; gap: 10px; padding: calc(var(--u)*2.4) calc(var(--u)*3); }
+    .status-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ink-faint); flex: none; }
+    .status-dot.pulse { background: var(--sev-medium); animation: pulse 1.4s ease-in-out infinite; }
+    .status-dot.ok { background: var(--ok); }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+    .success-icon { font-size: 34px; line-height: 1; }
+    .warn-box { border: 1px solid color-mix(in srgb, var(--sev-high) 45%, var(--line)); background: color-mix(in srgb, var(--sev-high) 8%, transparent); border-radius: var(--radius); padding: calc(var(--u)*2.2) calc(var(--u)*2.6); font-size: 12.5px; color: var(--ink-muted); }
+    .warn-box b { color: var(--ink); }
+    .actions { display: flex; gap: 10px; }
+    .err-box { display: none; border: 1px solid color-mix(in srgb, var(--sev-critical) 40%, var(--line)); background: color-mix(in srgb, var(--sev-critical) 8%, transparent); border-radius: var(--radius); padding: 10px 14px; font-size: 12.5px; color: var(--sev-critical); }
+    .view-step { display: none; }
+    .view-step.on { display: grid; gap: calc(var(--u)*4); }
+  </style>
+</head>
+<body>
+<div class="onb-shell">
+  <div>
+    <div class="onb-head">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <h1 class="onb-title">Connect your app to Argus</h1>
+    </div>
+    <p class="onb-sub">Get an API key and start streaming traces in under a minute — no login required.</p>
+    <div class="onb-steps" id="stepDots">
+      <span class="onb-step-dot active" data-dot="1"></span>
+      <span class="onb-step-dot" data-dot="2"></span>
+      <span class="onb-step-dot" data-dot="3"></span>
+    </div>
+  </div>
+
+  <div class="err-box" id="errBox"></div>
+
+  <!-- STEP 1 -->
+  <section class="view-step on" id="step1">
+    <div class="card">
+      <div class="card-head"><span class="card-title">1. Name your project</span></div>
+      <div class="pad" style="display:grid; gap: calc(var(--u)*3); padding: calc(var(--u)*3.2);">
+        <div class="field">
+          <label for="orgName">Company / organization name</label>
+          <input id="orgName" type="text" placeholder="AutoGovern Inc" maxlength="200" autocomplete="organization">
+          <span class="hint">Used to group projects — you can add more projects to it later via the same flow.</span>
+        </div>
+        <div class="field">
+          <label for="projName">Project name</label>
+          <input id="projName" type="text" placeholder="autogovern.io production" maxlength="200" autocomplete="off">
+          <span class="hint">One project per environment is typical, e.g. "production" and "staging" separately.</span>
+        </div>
+        <div class="actions">
+          <button class="btn btn-primary" id="createBtn" type="button">Create Project &amp; Get API Key</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- STEP 2 -->
+  <section class="view-step" id="step2">
+    <div class="card">
+      <div class="card-head"><span class="card-title">2. Your API key</span><span class="card-hint">shown once</span></div>
+      <div class="pad" style="display:grid; gap: calc(var(--u)*2.6); padding: calc(var(--u)*3.2);">
+        <div class="warn-box"><b>Save your secret key now.</b> For security, Argus stores only a hash of it — this is the only time it will ever be shown in full.</div>
+        <div class="field">
+          <label>Public key</label>
+          <div class="keybox"><span id="pubKeyOut"></span><button class="copy-btn" data-copy="pubKeyOut" type="button">Copy</button></div>
+        </div>
+        <div class="field">
+          <label>Secret key</label>
+          <div class="keybox"><span id="secKeyOut"></span><button class="copy-btn" data-copy="secKeyOut" type="button">Copy</button></div>
+        </div>
+        <div class="actions">
+          <button class="btn btn-primary" id="savedBtn" type="button">I've saved my key — Continue →</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- STEP 3 -->
+  <section class="view-step" id="step3">
+    <div class="card">
+      <div class="card-head"><span class="card-title">3. Send your first trace</span><span class="card-hint">pick your stack</span></div>
+      <div class="tabs" id="snippetTabs">
+        <button class="tab-btn active" data-tab="curl" type="button">cURL</button>
+        <button class="tab-btn" data-tab="node" type="button">Node.js</button>
+        <button class="tab-btn" data-tab="python" type="button">Python</button>
+        <button class="tab-btn" data-tab="otlp" type="button">OpenTelemetry</button>
+      </div>
+      <div class="snippet-wrap">
+        <button class="copy-btn snippet-copy" data-copy-snippet="1" type="button">Copy</button>
+        <pre class="snippet" id="snippetOut"></pre>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="status-row">
+        <span class="status-dot pulse" id="statusDot"></span>
+        <span id="statusText">Waiting for your first trace…</span>
+      </div>
+    </div>
+
+    <div class="card" id="successCard" style="display:none">
+      <div class="pad" style="text-align:center; padding: calc(var(--u)*4) calc(var(--u)*3); display:grid; gap:12px; justify-items:center;">
+        <span class="success-icon">✅</span>
+        <div style="font-size:16px; font-weight:650;">You're connected</div>
+        <div class="dim" id="successSub" style="font-size:12.5px;"></div>
+        <div class="field" style="width:100%; max-width:520px;">
+          <label>Your personalized dashboard link</label>
+          <div class="keybox"><span id="dashLinkOut"></span><button class="copy-btn" data-copy="dashLinkOut" type="button">Copy</button></div>
+          <span class="hint">Bookmark this — it filters the dashboard to only your project's traces and security events.</span>
+        </div>
+        <a class="btn btn-primary" id="openDashBtn" href="/" style="text-decoration:none; display:inline-block;">Open your dashboard →</a>
+      </div>
+    </div>
+  </section>
+</div>
+<script src="/onboard.js"></script>
+</body>
+</html>

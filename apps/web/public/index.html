@@ -103,6 +103,7 @@
       <button class="nav-item" type="button" data-nav="evals"><span class="nav-ico">✓</span>Evals</button>
     </div>
     <div class="rail-foot">
+      <a class="nav-item" href="/onboard.html" style="text-decoration:none;"><span class="nav-ico">+</span>Connect a new app</a>
       <button class="nav-item" type="button" data-nav="guide"><span class="nav-ico">ℹ</span>User Guide</button>
       <button class="nav-item" type="button" data-nav="appearance"><span class="nav-ico">⚙</span>Settings</button>
     </div>
@@ -110,7 +111,7 @@
 
   <div class="main">
     <header class="topbar">
-      <button class="ctx" type="button"><span class="k">Project</span> checkout-copilot</button>
+      <button class="ctx" type="button" id="projectCtx" title="Scoped by your personalized onboarding link"><span class="k">Project</span> <span id="projectLabel">All projects</span></button>
       <button class="ctx" type="button"><span class="k">Env</span> production</button>
       <div class="menu" id="rangeMenu">
         <button class="ctx" type="button" id="rangeBtn"><span class="k">Range</span> <span id="rangeLabel">All time</span> <span class="caret">▾</span></button>
@@ -289,6 +290,7 @@
             <button class="toc-link" data-scroll="g-about">Overview</button>
             <button class="toc-link" data-scroll="g-concepts">Core concepts</button>
             <button class="toc-link" data-scroll="g-start">Quick start</button>
+            <button class="toc-link" data-scroll="g-onboarding">Connect a new app</button>
             <button class="toc-link" data-scroll="g-globalnav">Global controls</button>
             <div class="toc-label">Security pages</div>
             <button class="toc-link" data-scroll="g-threat">Threat Center</button>
@@ -390,8 +392,8 @@
               <h2>Quick start</h2>
               <p class="lede">The dashboard is read-only against your data — the real setup work is making sure your application is sending traces to Argus. Here's the typical path from zero to a working dashboard.</p>
               <div class="steps">
-                <div class="step"><div class="step-num">1</div><div class="step-body"><b>Get an API key</b><p>Your Argus deployment issues a public/secret key pair per project. Whoever operates your deployment provisions this (there's no self-service key screen in the dashboard yet). You'll authenticate ingestion requests with HTTP Basic auth using this pair.</p></div></div>
-                <div class="step"><div class="step-num">2</div><div class="step-body"><b>Point your app at the ingestion endpoint</b><p>Send traces to <code>POST /api/public/ingestion</code> (a native/Langfuse-compatible batch endpoint) or <code>POST /v1/traces</code> (OpenTelemetry GenAI-convention spans). Most existing OTel or Langfuse instrumentation works with little to no change.</p></div></div>
+                <div class="step"><div class="step-num">1</div><div class="step-body"><b>Get an API key</b><p>Self-service — no login required. Use <button class="toc-link" style="display:inline;padding:0;color:var(--accent);text-decoration:underline" data-scroll="g-onboarding">Connect a new app</button> to create a project and get a public/secret key pair in under a minute. You'll authenticate ingestion requests with HTTP Basic auth using this pair.</p></div></div>
+                <div class="step"><div class="step-num">2</div><div class="step-body"><b>Point your app at the ingestion endpoint</b><p>Send traces to <code>POST /api/public/ingestion</code> (a native/Langfuse-compatible batch endpoint) or <code>POST /v1/traces</code> (OpenTelemetry GenAI-convention spans). Most existing OTel or Langfuse instrumentation works with little to no change — the onboarding flow shows a ready-to-run snippet for each.</p></div></div>
                 <div class="step"><div class="step-num">3</div><div class="step-body"><b>Let taint classification happen automatically</b><p>You don't need to tag anything manually — retrieval and tool spans are treated as untrusted by default. If a specific tool is actually safe (e.g. an internal calculator), your admin can add a tool override so it isn't treated as an attack surface.</p></div></div>
                 <div class="step"><div class="step-num">4</div><div class="step-body"><b>Watch the Overview page</b><p>Once traces start arriving, <button class="toc-link" style="display:inline;padding:0;color:var(--accent);text-decoration:underline" data-scroll="g-ovpage">Overview</button> fills in with real counts — traces, spans, tokens, cost, and any security events found.</p></div></div>
                 <div class="step"><div class="step-num">5</div><div class="step-body"><b>Triage anything flagged</b><p>Open <button class="toc-link" style="display:inline;padding:0;color:var(--accent);text-decoration:underline" data-scroll="g-threat">Threat Center</button> to see the live attack feed, or <button class="toc-link" style="display:inline;padding:0;color:var(--accent);text-decoration:underline" data-scroll="g-review">Review Queue</button> to work through unreviewed events one at a time and record a verdict.</p></div></div>
@@ -399,17 +401,31 @@
               </div>
             </article>
 
+            <article class="guide-sec" id="g-onboarding">
+              <h2>Connect a new app</h2>
+              <p>A standalone, three-step self-service page — <b>+ Connect a new app</b> in the left rail — for onboarding yourself or a client with no login and no manual database work.</p>
+              <table class="field-table">
+                <tr><th>Step</th><th>What happens</th></tr>
+                <tr><td>1. Name your project</td><td>Enter a company/organization name and a project name (e.g. one project per environment: "production", "staging"). Creates the organization, project, a permissive default detection config, and an API key pair.</td></tr>
+                <tr><td>2. Your API key</td><td>The public and secret key are shown <b>once</b> — Argus stores only a hash of the secret. Copy buttons for each; a warning makes clear this is the only time the secret is shown in full.</td></tr>
+                <tr><td>3. Send your first trace</td><td>Ready-to-run, pre-filled code snippets for cURL, Node.js, Python, and OpenTelemetry — copy, paste, run. Below it, a live status indicator polls every few seconds and flips from "Waiting for your first trace…" to "Connected" the moment data arrives, no page refresh needed.</td></tr>
+              </table>
+              <p>On success you get a <b>personalized dashboard link</b> (<code>?project=&lt;id&gt;</code>) — bookmark and share it. Opening that link scopes every page (Overview, Threat Center, Traces, everything) to just that project's data, so one client never sees another's traces or security events.</p>
+              <div class="callout"><b>Note:</b> this is intentionally lightweight — the secret key is the only credential, there's no rate limiting or email verification on project creation yet. Treat the onboarding URL like you would any other unauthenticated signup form.</div>
+              <button class="btn btn-primary open-page" type="button" onclick="location.href='/onboard.html'">Open Connect a new app →</button>
+            </article>
+
             <article class="guide-sec" id="g-globalnav">
               <h2>Global controls</h2>
               <p>These controls appear on every page, in the top bar and left rail.</p>
               <table class="field-table">
                 <tr><th>Control</th><th>What it does</th></tr>
-                <tr><td>Project selector</td><td>Shows the current project name (e.g. <code>checkout-copilot</code>). Currently a display-only label — this deployment shows a single project. Switching between multiple projects is planned.</td></tr>
-                <tr><td>Env selector</td><td>Shows the current environment (e.g. <code>production</code>). Also display-only today.</td></tr>
+                <tr><td>Project selector</td><td>Shows either <b>All projects</b> (the default, unscoped view) or a truncated project ID when you're viewing a personalized onboarding link (<code>?project=&lt;id&gt;</code>) — see <button class="toc-link" style="display:inline;padding:0;color:var(--accent);text-decoration:underline" data-scroll="g-onboarding">Connect a new app</button> below. Not yet a clickable dropdown to switch between projects manually.</td></tr>
+                <tr><td>Env selector</td><td>Shows the current environment (e.g. <code>production</code>). Currently display-only.</td></tr>
                 <tr><td>Range menu</td><td>Click to choose <b>All time</b>, <b>Last 24 hours</b>, <b>Last 7 days</b>, or <b>Last 30 days</b>. This filters every KPI, chart, and table on the page you're viewing — the filter is applied to the underlying data, not just what's displayed. Changing it automatically reloads the current page.</td></tr>
                 <tr><td>↻ Refresh</td><td>Re-runs the queries for whichever page you're currently on, without changing your filters. Use it after taking an action (like confirming an event) to see the latest state, or just to pull in newly-arrived traces.</td></tr>
                 <tr><td>Avatar (top right)</td><td>Placeholder for the signed-in user. Authentication isn't wired up in this build — the dashboard is currently unauthenticated.</td></tr>
-                <tr><td>Left rail navigation</td><td>Every page in the app. Grouped into Security, Observability, Engineering, plus this User Guide and Settings at the bottom.</td></tr>
+                <tr><td>Left rail navigation</td><td>Every page in the app. Grouped into Security, Observability, Engineering, plus <b>+ Connect a new app</b>, this User Guide, and Settings at the bottom.</td></tr>
                 <tr><td>Nav badges</td><td>Small numbers next to <b>Threat Center</b> (count of critical events) and <b>Review Queue</b> (count of unreviewed events). These populate once you've opened that page at least once in your session.</td></tr>
               </table>
               <div class="callout"><b>Note:</b> the banner that appears just under the top bar (in red) means a query to the database failed — usually a temporary connectivity issue. Click Refresh to retry.</div>
@@ -637,7 +653,9 @@
               <h3>Is it safe to view content that contains an attack payload?</h3>
               <p>Yes. Every piece of stored content — including anything an attacker tried to inject — is rendered strictly as plain text, never executed or interpreted as HTML. A stored prompt injection can never become a stored script in your browser.</p>
               <h3>Why do Project and Env look like buttons but don't do anything?</h3>
-              <p>They're placeholders for multi-project/multi-environment support, which isn't wired up yet. This deployment shows a single project and environment.</p>
+              <p>The <b>Env</b> selector is still a placeholder. <b>Project</b> now reflects real scoping: it shows "All projects" by default, or a project ID when you're on a personalized onboarding link — see <button class="toc-link" style="display:inline;padding:0;color:var(--accent);text-decoration:underline" data-scroll="g-onboarding">Connect a new app</button>. Neither is a clickable dropdown yet for switching projects manually mid-session.</p>
+              <h3>I onboarded a new project but its dashboard looks empty.</h3>
+              <p>Make sure you're on your personalized link (<code>?project=&lt;id&gt;</code>, shown after your first trace lands) and that your app is actually sending traces to the ingest URL and key pair from step 3 of onboarding. The unscoped dashboard (no <code>?project=</code>) shows every project combined, so if you see data there but not on your scoped link, double-check the project ID in the URL matches the one you were given.</p>
             </article>
 
           </div>

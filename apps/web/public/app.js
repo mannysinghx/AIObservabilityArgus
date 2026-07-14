@@ -5,6 +5,15 @@ const SEV_ORDER = { none: 0, info: 1, low: 2, medium: 3, high: 4, critical: 5 };
 const SEV_NAME = ["none", "info", "low", "medium", "high", "critical"];
 let RANGE = "";
 let TRACE_BACK = "traces";
+// A self-onboarded client's personalized link carries ?project=<uuid>, which
+// scopes every query to just their data. Absent => default "all projects" view.
+const PROJECT = new URLSearchParams(location.search).get("project") || "";
+if (PROJECT) {
+  document.addEventListener("DOMContentLoaded", () => {
+    const el = document.getElementById("projectLabel");
+    if (el) el.textContent = PROJECT.slice(0, 8) + "…";
+  });
+}
 
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -27,8 +36,12 @@ const outcomePill = (o) => `<span class="pill pill-${o === "succeeded" ? "critic
 const dur = (ms) => (ms >= 1000 ? (ms / 1000).toFixed(2) + " s" : Math.round(ms) + " ms");
 
 async function api(path) {
+  const params = new URLSearchParams();
+  if (RANGE) params.set("range", RANGE);
+  if (PROJECT) params.set("project", PROJECT);
+  const qs = params.toString();
   const sep = path.includes("?") ? "&" : "?";
-  const r = await fetch(path + (RANGE ? `${sep}range=${RANGE}` : ""));
+  const r = await fetch(path + (qs ? `${sep}${qs}` : ""));
   if (!r.ok) throw new Error(`${path} → ${r.status}`);
   return r.json();
 }

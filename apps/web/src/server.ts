@@ -3,55 +3,59 @@ import { dirname, join } from "node:path";
 import Fastify from "fastify";
 import fastifyStatic from "@fastify/static";
 import { config } from "@argus/shared";
-import {
-  analytics,
-  attackFeed,
-  health,
-  overview,
-  traceDetail,
-  tracesList,
-} from "./queries.js";
+import * as Q from "./queries.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, "..", "public");
-
-// PORT (Railway) or WEB_PORT locally, default 3002.
 const port = Number(process.env.PORT ?? process.env.WEB_PORT ?? 3002);
 
 const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? "info" } });
-
 await app.register(fastifyStatic, { root: PUBLIC_DIR, prefix: "/" });
 
-app.get("/health", async () => ({ status: (await health()) ? "ok" : "degraded", service: "argus-web" }));
+app.get("/health", async () => ({ status: (await Q.health()) ? "ok" : "degraded", service: "argus-web" }));
 
-// Wrap query handlers so a ClickHouse hiccup returns a clean 503, not a crash.
-function route(name: string, fn: () => Promise<unknown>) {
-  app.get(`/api/${name}`, async (_req, reply) => {
+// Wrap a query so a ClickHouse hiccup returns 503 instead of crashing.
+function guard<T>(name: string, fn: (range?: string) => Promise<T>) {
+  app.get(`/api/${name}`, async (req, reply) => {
     try {
-      return await fn();
+      const range = (req.query as { range?: string } | undefined)?.range;
+      return await fn(range);
     } catch (err) {
-      app.log.error({ err }, `query ${name} failed`);
+      app.log.error({ err }, `${name} failed`);
       reply.code(503).send({ error: "query failed", detail: String(err) });
     }
   });
 }
 
-route("overview", overview);
-route("attacks", () => attackFeed(80));
-route("traces", () => tracesList(80));
-route("analytics", analytics);
+guard("overview", Q.overview);
+guard("threat", Q.threat);
+guard("attacks", (r) => Q.attackFeed(r));
+guard("incidents", Q.incidents);
+guard("review", Q.reviewQueue);
+guard("sessions", Q.sessions);
+guard("traces", (r) => Q.tracesList(r));
+guard("analytics", Q.analytics);
+guard("prompts", () => Q.prompts());
 
 app.get<{ Params: { id: string } }>("/api/trace/:id", async (req, reply) => {
+  try { return await Q.traceDetail(req.params.id); }
+  catch (err) { app.log.error({ err }, "trace failed"); reply.code(503).send({ error: String(err) }); }
+});
+
+// Analyst action: set a verdict on a security event.
+app.post<{ Body: { eventId?: string; verdict?: string } }>("/api/verdict", async (req, reply) => {
+  const { eventId, verdict } = req.body || {};
+  if (!eventId || !verdict) { reply.code(400).send({ error: "eventId and verdict required" }); return; }
   try {
-    return await traceDetail(req.params.id);
+    const ok = await Q.setVerdict(eventId, verdict);
+    if (!ok) { reply.code(404).send({ error: "event not found" }); return; }
+    return { ok: true, eventId, verdict };
   } catch (err) {
-    app.log.error({ err }, "trace detail failed");
-    reply.code(503).send({ error: "query failed", detail: String(err) });
+    app.log.error({ err }, "verdict failed");
+    reply.code(500).send({ error: String(err) });
   }
 });
 
-// Public-facing service: bind 0.0.0.0 (matches the proven ingest service). It
-// only calls ClickHouse outbound, so it needs no inbound IPv6 private network.
 try {
   await app.listen({ port, host: "0.0.0.0" });
   app.log.info(`argus-web on :${port} (clickhouse: ${config.clickhouseUrl})`);

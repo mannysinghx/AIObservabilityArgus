@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Argus — Security Observability</title>
+  <title>Argus — AI Observability & Security</title>
   <link rel="stylesheet" href="/app.css">
   <style>
-    /* dashboard-only additions on top of the shared design tokens */
     .loading { color: var(--ink-faint); font-size: 13px; padding: calc(var(--u)*3); }
-    .empty { color: var(--ink-faint); font-size: 13px; padding: calc(var(--u)*4); text-align: center; }
+    .empty { color: var(--ink-faint); font-size: 13px; padding: calc(var(--u)*5); text-align: center; }
+    .empty .big { font-size: 15px; color: var(--ink-muted); margin-bottom: 6px; }
     .clickable { cursor: pointer; }
     .breakdown { display: grid; gap: 7px; padding: calc(var(--u)*2.6) calc(var(--u)*3.2); font-size: 12.5px; }
     .breakdown .row { display: flex; justify-content: space-between; align-items: center; }
@@ -22,6 +22,22 @@
     table.data tr:last-child td { border-bottom:none; }
     table.data tr.clickable:hover td { background: var(--surface-2); }
     .status-banner { display:none; margin:0 calc(var(--u)*5); padding:10px 14px; border-radius:var(--radius); background:color-mix(in srgb,var(--sev-critical) 12%,transparent); color:var(--sev-critical); font-size:12.5px; }
+    .menu { position: relative; }
+    .menu-pop { position:absolute; top:110%; left:0; z-index:20; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); box-shadow:0 8px 28px rgba(0,0,0,.18); padding:4px; display:none; min-width:150px; }
+    .menu.open .menu-pop { display:block; }
+    .menu-pop button { display:block; width:100%; text-align:left; background:none; border:none; font:inherit; font-size:12.5px; color:var(--ink); padding:7px 10px; border-radius:4px; cursor:pointer; }
+    .menu-pop button:hover, .menu-pop button.on { background:var(--accent-soft); }
+    .incident-card { padding: calc(var(--u)*2.6) calc(var(--u)*3.2); border-bottom:1px solid var(--line); cursor:pointer; }
+    .incident-card:last-child { border-bottom:none; }
+    .incident-card:hover { background: var(--surface-2); }
+    .tag { display:inline-block; font-size:10.5px; background:var(--surface-2); color:var(--ink-muted); border-radius:99px; padding:1px 8px; margin-right:4px; }
+    .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:calc(var(--u)*3); align-items:start; }
+    @media (max-width:1100px){ .grid-2 { grid-template-columns:1fr; } }
+    .drawer-body { padding: calc(var(--u)*2.6) calc(var(--u)*3.2); }
+    .payload { font-family:var(--font-mono); font-size:11.5px; line-height:1.6; background:var(--surface-2); border-radius:var(--radius); padding:10px 12px; white-space:pre-wrap; overflow-wrap:anywhere; max-height:340px; overflow:auto; }
+    .verdict-tag { font-size:10px; text-transform:uppercase; letter-spacing:.06em; padding:1px 7px; border-radius:99px; }
+    .verdict-confirmed { color:var(--sev-critical); background:color-mix(in srgb,var(--sev-critical) 12%,transparent); }
+    .verdict-false_positive { color:var(--ok); background:color-mix(in srgb,var(--ok) 12%,transparent); }
   </style>
 </head>
 <body>
@@ -32,62 +48,105 @@
       <div><div class="brand-name">Argus</div><div class="brand-env" id="envLabel">live</div></div>
     </div>
     <div class="nav-group">
+      <button class="nav-item active" type="button" data-nav="overview"><span class="nav-ico">◧</span>Overview</button>
+    </div>
+    <div class="nav-group">
       <div class="nav-label">Security</div>
-      <button class="nav-item active" type="button" data-nav="threat"><span class="nav-ico">◉</span>Threat Center<span class="nav-badge" id="critBadge" style="display:none">0</span></button>
+      <button class="nav-item" type="button" data-nav="threat"><span class="nav-ico">◉</span>Threat Center<span class="nav-badge" id="critBadge" style="display:none">0</span></button>
+      <button class="nav-item" type="button" data-nav="incidents"><span class="nav-ico">⚑</span>Incidents</button>
+      <button class="nav-item" type="button" data-nav="review"><span class="nav-ico">☰</span>Review Queue<span class="nav-badge" id="reviewBadge" style="display:none;background:var(--sev-high)">0</span></button>
+      <button class="nav-item" type="button" data-nav="redteam"><span class="nav-ico">⚔</span>Red Team</button>
     </div>
     <div class="nav-group">
       <div class="nav-label">Observability</div>
       <button class="nav-item" type="button" data-nav="traces"><span class="nav-ico">≣</span>Traces</button>
+      <button class="nav-item" type="button" data-nav="sessions"><span class="nav-ico">◫</span>Sessions</button>
       <button class="nav-item" type="button" data-nav="analytics"><span class="nav-ico">◔</span>Analytics</button>
     </div>
+    <div class="nav-group">
+      <div class="nav-label">Engineering</div>
+      <button class="nav-item" type="button" data-nav="prompts"><span class="nav-ico">¶</span>Prompts</button>
+      <button class="nav-item" type="button" data-nav="evals"><span class="nav-ico">✓</span>Evals</button>
+    </div>
     <div class="rail-foot">
-      <button class="nav-item" type="button" data-nav="appearance"><span class="nav-ico">⚙</span>Appearance</button>
+      <button class="nav-item" type="button" data-nav="appearance"><span class="nav-ico">⚙</span>Settings</button>
     </div>
   </nav>
 
   <div class="main">
     <header class="topbar">
-      <button class="ctx" type="button" id="refreshBtn"><span class="k">↻</span> Refresh</button>
+      <button class="ctx" type="button"><span class="k">Project</span> checkout-copilot</button>
+      <button class="ctx" type="button"><span class="k">Env</span> production</button>
+      <div class="menu" id="rangeMenu">
+        <button class="ctx" type="button" id="rangeBtn"><span class="k">Range</span> <span id="rangeLabel">All time</span> <span class="caret">▾</span></button>
+        <div class="menu-pop">
+          <button data-range="" class="on">All time</button>
+          <button data-range="24h">Last 24 hours</button>
+          <button data-range="7d">Last 7 days</button>
+          <button data-range="30d">Last 30 days</button>
+        </div>
+      </div>
+      <button class="ctx" type="button" id="refreshBtn">↻ Refresh</button>
       <span class="page-sub" id="lastUpdated" style="font-size:12px;"></span>
-      <div class="cmdk" style="margin-left:auto;">Argus dashboard · read-only</div>
+      <div class="cmdk" style="margin-left:auto;">Argus · AI observability &amp; security</div>
       <span class="avatar">A</span>
     </header>
     <div class="status-banner" id="statusBanner"></div>
 
     <main class="content">
-      <!-- THREAT CENTER -->
-      <section class="view on" id="view-threat">
-        <div class="page-head">
-          <h1 class="page-title">Threat Center</h1>
-          <span class="page-sub"><span class="live-dot"></span><span id="threatSub">loading…</span></span>
+      <!-- OVERVIEW -->
+      <section class="view on" id="view-overview">
+        <div class="page-head"><h1 class="page-title">Overview</h1><span class="page-sub"><span class="live-dot"></span><span id="ovSub">loading…</span></span></div>
+        <div class="kpis" id="ovSecurity"></div>
+        <div class="kpis" id="ovObs"></div>
+        <div class="grid-2">
+          <div class="card"><div class="card-head"><span class="card-title">Security posture</span></div><div class="breakdown" id="ovPosture"></div></div>
+          <div class="card"><div class="card-head"><span class="card-title">Traffic</span></div><div class="breakdown" id="ovTraffic"></div></div>
         </div>
-        <div class="kpis" id="kpis"><div class="loading">loading KPIs…</div></div>
+      </section>
+
+      <!-- THREAT CENTER -->
+      <section class="view" id="view-threat">
+        <div class="page-head"><h1 class="page-title">Threat Center</h1><span class="page-sub"><span class="live-dot"></span><span id="threatSub">loading…</span></span></div>
+        <div class="kpis" id="threatKpis"></div>
         <div class="grid-23">
           <div class="card">
-            <div class="card-head"><span class="card-title">Attack feed</span><span class="card-hint">most recent security events · click a row to open its trace</span></div>
+            <div class="card-head"><span class="card-title">Attack feed</span><span class="card-hint">click a row to expand evidence &amp; act</span></div>
             <div class="tablewrap"><table class="feed" id="attackFeed"><tbody><tr><td class="loading">loading…</td></tr></tbody></table></div>
           </div>
           <div class="stack">
-            <div class="card">
-              <div class="card-head"><span class="card-title">By severity</span></div>
-              <div class="breakdown" id="bySeverity"></div>
-            </div>
-            <div class="card">
-              <div class="card-head"><span class="card-title">By category</span></div>
-              <div class="breakdown" id="byCategory"></div>
-            </div>
+            <div class="card"><div class="card-head"><span class="card-title">Detection layer activity</span></div><div class="pad stack" id="layerHealth" style="gap:2px"></div></div>
+            <div class="card"><div class="card-head"><span class="card-title">Escalation funnel</span></div><div class="pad funnel" id="funnel"></div></div>
+            <div class="card"><div class="card-head"><span class="card-title">Most-targeted surfaces</span></div><div class="pad stack" id="surfaces" style="gap:8px;font-size:12.5px"></div></div>
+            <div class="card"><div class="card-head"><span class="card-title">By severity</span></div><div class="breakdown" id="bySeverity"></div></div>
+            <div class="card"><div class="card-head"><span class="card-title">By category</span></div><div class="breakdown" id="byCategory"></div></div>
           </div>
         </div>
         <div class="card">
           <div class="card-head"><span class="card-title">Events over time</span>
-            <div class="chart-legend">
-              <span style="--c: var(--sev-critical)">Indirect injection</span>
-              <span style="--c: var(--sev-high)">Direct / jailbreak</span>
-              <span style="--c: var(--sev-low)">Output-side</span>
-            </div>
+            <div class="chart-legend"><span style="--c: var(--sev-critical)">Indirect injection</span><span style="--c: var(--sev-high)">Direct / jailbreak</span><span style="--c: var(--sev-low)">Output-side</span></div>
           </div>
-          <div class="pad chartwrap chart"><svg id="trendChart" viewBox="0 0 960 200" role="img" aria-label="Events over time"></svg></div>
+          <div class="pad chartwrap chart"><svg id="trendChart" viewBox="0 0 960 200"></svg></div>
         </div>
+      </section>
+
+      <!-- INCIDENTS -->
+      <section class="view" id="view-incidents">
+        <div class="page-head"><h1 class="page-title">Incidents</h1><span class="page-sub" id="incidentsSub">grouped high &amp; critical activity</span></div>
+        <div class="card"><div class="card-head"><span class="card-title">Recurring / poisoned sources</span><span class="card-hint">same content across multiple traces</span></div><div id="poisonedList"></div></div>
+        <div class="card"><div class="card-head"><span class="card-title">Trace incidents</span><span class="card-hint">traces with high/critical events</span></div><div id="incidentList"></div></div>
+      </section>
+
+      <!-- REVIEW QUEUE -->
+      <section class="view" id="view-review">
+        <div class="page-head"><h1 class="page-title">Review Queue</h1><span class="page-sub" id="reviewSub">unreviewed events — confirm or dismiss</span></div>
+        <div class="card"><div class="tablewrap"><table class="feed" id="reviewTable"><tbody></tbody></table></div></div>
+      </section>
+
+      <!-- RED TEAM -->
+      <section class="view" id="view-redteam">
+        <div class="page-head"><h1 class="page-title">Red Team</h1><span class="page-sub">scheduled attack simulation &amp; regression</span></div>
+        <div class="card"><div class="empty"><div class="big">No red-team runs yet</div>Schedule garak / promptfoo suites against an endpoint to track attack-success-rate over time. Runs land here as scored traces (roadmap Phase 4).</div></div>
       </section>
 
       <!-- TRACES -->
@@ -99,7 +158,7 @@
       <!-- TRACE DETAIL -->
       <section class="view" id="view-trace">
         <div class="page-head" style="gap:16px;">
-          <button class="back" id="backToTraces">← Traces</button>
+          <button class="back" id="backLink">← Back</button>
           <h1 class="page-title" style="font-size:16px;">Trace <span class="mono" id="traceIdLabel" style="color:var(--ink-muted)"></span></h1>
           <span id="traceSevPill"></span>
         </div>
@@ -113,49 +172,75 @@
               <span><span class="sw" style="background:var(--canary-wash);border:1px solid var(--sev-critical)"></span>security event</span>
             </div>
           </div>
-          <div class="card">
-            <div class="card-head"><span class="card-title">Security events</span></div>
-            <div class="pad stack" id="traceEvents" style="gap:12px;"></div>
+          <div class="card" id="spanDrawer">
+            <div class="card-head"><span class="card-title" id="drawerTitle">Select a span</span><span class="card-hint mono" id="drawerId"></span></div>
+            <div class="drawer-tabs" id="drawerTabs">
+              <button class="dtab active" data-tab="security" type="button">Security</button>
+              <button class="dtab" data-tab="input" type="button">Input</button>
+              <button class="dtab" data-tab="output" type="button">Output</button>
+              <button class="dtab" data-tab="attributes" type="button">Attributes</button>
+            </div>
+            <div class="drawer-body" id="drawerBody"><div class="dim" style="font-size:12px;">Click a span in the waterfall to inspect it.</div></div>
           </div>
         </div>
+      </section>
+
+      <!-- SESSIONS -->
+      <section class="view" id="view-sessions">
+        <div class="page-head"><h1 class="page-title">Sessions</h1><span class="page-sub" id="sessionsSub">multi-turn conversations</span></div>
+        <div class="card"><div class="tablewrap"><table class="data" id="sessionsTable"><tbody></tbody></table></div></div>
       </section>
 
       <!-- ANALYTICS -->
       <section class="view" id="view-analytics">
-        <div class="page-head"><h1 class="page-title">Analytics</h1><span class="page-sub">cost, tokens & latency</span></div>
-        <div class="kpis metric-tiles" id="analyticsTiles"><div class="loading">loading…</div></div>
+        <div class="page-head"><h1 class="page-title">Analytics</h1><span class="page-sub">cost, tokens, latency &amp; models</span></div>
+        <div class="kpis metric-tiles" id="analyticsTiles"></div>
+        <div class="card"><div class="card-head"><span class="card-title">Cost over time</span><div class="chart-legend"><span style="--c: var(--accent)">Cost (USD)</span></div></div><div class="pad chartwrap chart"><svg id="costChart" viewBox="0 0 960 180"></svg></div></div>
         <div class="grid-23">
-          <div class="card">
-            <div class="card-head"><span class="card-title">Cost & tokens by model</span></div>
-            <div class="tablewrap"><table class="data" id="modelTable"><tbody></tbody></table></div>
-          </div>
-          <div class="card">
-            <div class="card-head"><span class="card-title">Observations by type</span></div>
-            <div class="breakdown" id="byType"></div>
+          <div class="card"><div class="card-head"><span class="card-title">Cost &amp; tokens by model</span></div><div class="tablewrap"><table class="data" id="modelTable"><tbody></tbody></table></div></div>
+          <div class="stack">
+            <div class="card"><div class="card-head"><span class="card-title">Observations by type</span></div><div class="breakdown" id="byType"></div></div>
+            <div class="card"><div class="card-head"><span class="card-title">By provider</span></div><div class="breakdown" id="byProvider"></div></div>
+            <div class="card"><div class="card-head"><span class="card-title">By environment</span></div><div class="breakdown" id="byEnv"></div></div>
           </div>
         </div>
       </section>
 
-      <!-- APPEARANCE -->
+      <!-- PROMPTS -->
+      <section class="view" id="view-prompts">
+        <div class="page-head"><h1 class="page-title">Prompts</h1><span class="page-sub">versioned prompt management</span></div>
+        <div class="card"><div class="empty"><div class="big">No prompts registered yet</div>Manage versioned prompts (labels, deployments, diffs) via the prompts API. They'll appear here once created.</div></div>
+      </section>
+
+      <!-- EVALS -->
+      <section class="view" id="view-evals">
+        <div class="page-head"><h1 class="page-title">Evals</h1><span class="page-sub">scores &amp; judgments</span></div>
+        <div class="card"><div class="card-head"><span class="card-title">Score summary</span></div><div class="tablewrap"><table class="data" id="evalsTable"><tbody></tbody></table></div></div>
+      </section>
+
+      <!-- SETTINGS -->
       <section class="view" id="view-appearance">
-        <div class="page-head"><h1 class="page-title">Appearance</h1><span class="page-sub">applies instantly — same token system as the design spec</span></div>
-        <div class="card" style="max-width:560px;">
-          <div class="set-row" style="padding:calc(var(--u)*2.6) calc(var(--u)*3.2);display:grid;gap:10px;">
-            <div class="set-name" style="font-weight:600;">Theme</div>
-            <div class="seg" data-set="theme"><button type="button" data-val="system" class="on">System</button><button type="button" data-val="light">Light</button><button type="button" data-val="dark">Dark</button></div>
+        <div class="page-head"><h1 class="page-title">Settings — Appearance</h1><span class="page-sub">applies instantly — same token system as the design spec</span></div>
+        <div class="settings-grid">
+          <div class="card">
+            <div class="set-row"><div class="set-name">Theme</div><div class="set-desc">Follows your OS by default.</div>
+              <div class="seg" data-set="theme"><button type="button" data-val="system" class="on">System</button><button type="button" data-val="light">Light</button><button type="button" data-val="dark">Dark</button></div></div>
+            <div class="set-row"><div class="set-name">Accent</div><div class="set-desc">Interaction color only — severity colors are fixed so alerts always read the same.</div>
+              <div class="swatches" data-set="accent">
+                <button class="swatch on" type="button" data-val="" data-name="Radar" style="background:#35B5A4"></button>
+                <button class="swatch" type="button" data-val="indigo" data-name="Indigo" style="background:#5B6EE8"></button>
+                <button class="swatch" type="button" data-val="ember" data-name="Ember" style="background:#D26A3F"></button>
+                <button class="swatch" type="button" data-val="steel" data-name="Steel" style="background:#5C7C9E"></button>
+              </div></div>
+            <div class="set-row"><div class="set-name">Density</div><div class="set-desc">Compact fits ~30% more rows per screen.</div>
+              <div class="seg" data-set="density"><button type="button" data-val="" class="on">Comfortable</button><button type="button" data-val="compact">Compact</button></div></div>
+            <div class="set-row"><div class="set-name">Corner radius</div><div class="set-desc">Zero for a squared, terminal-like feel.</div>
+              <div class="seg" data-set="radius"><button type="button" data-val="0">0</button><button type="button" data-val="" class="on">6</button><button type="button" data-val="10">10</button></div></div>
           </div>
-          <div class="set-row" style="padding:calc(var(--u)*2.6) calc(var(--u)*3.2);display:grid;gap:10px;border-top:1px solid var(--line);">
-            <div class="set-name" style="font-weight:600;">Accent</div>
-            <div class="swatches" data-set="accent" style="display:flex;gap:10px;">
-              <button class="swatch on" type="button" data-val="" style="width:30px;height:30px;border-radius:50%;background:#35B5A4;border:2px solid var(--ink);cursor:pointer;"></button>
-              <button class="swatch" type="button" data-val="indigo" style="width:30px;height:30px;border-radius:50%;background:#5B6EE8;border:2px solid transparent;cursor:pointer;"></button>
-              <button class="swatch" type="button" data-val="ember" data-name="ember" style="width:30px;height:30px;border-radius:50%;background:#D26A3F;border:2px solid transparent;cursor:pointer;"></button>
-              <button class="swatch" type="button" data-val="steel" style="width:30px;height:30px;border-radius:50%;background:#5C7C9E;border:2px solid transparent;cursor:pointer;"></button>
-            </div>
-          </div>
-          <div class="set-row" style="padding:calc(var(--u)*2.6) calc(var(--u)*3.2);display:grid;gap:10px;border-top:1px solid var(--line);">
-            <div class="set-name" style="font-weight:600;">Density</div>
-            <div class="seg" data-set="density"><button type="button" data-val="" class="on">Comfortable</button><button type="button" data-val="compact">Compact</button></div>
+          <div class="stack">
+            <div class="card"><div class="card-head"><span class="card-title">Connection</span></div>
+              <div class="set-row"><div class="set-desc" id="connInfo" style="max-width:none">Read-only dashboard querying ClickHouse server-side. All data on this page is live from your deployment.</div></div></div>
+            <div class="note">Every color and size here manipulates CSS custom properties — the three-layer token architecture from docs/08-ui-design-spec.md.</div>
           </div>
         </div>
       </section>

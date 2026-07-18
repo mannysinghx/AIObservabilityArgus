@@ -100,11 +100,15 @@ export async function threat(range?: string, projectId?: string) {
     { layer: "L4 trace analysis", scope: "on trace completion", n: Number(funnel?.l4_signals || 0) },
   ];
 
-  // Most-targeted surfaces: join events to their source observation.
+  // Most-targeted surfaces: join events to their source observation. Scoped by
+  // project on BOTH sides — trace_id/observation_id are caller-supplied and
+  // never guaranteed unique across tenants (e.g. a fixed "smoke test" ID used
+  // by many onboarding clients), so joining on those alone can silently pull
+  // in another project's observation for a same-named span.
   const surfaces = await q(`
     SELECT o.type AS type, o.name AS name, count() AS events
     FROM (SELECT trace_id, observation_id FROM security_events FINAL WHERE observation_id != '' ${se}) se
-    INNER JOIN (SELECT trace_id, observation_id, type, name FROM observations FINAL) o
+    INNER JOIN (SELECT trace_id, observation_id, type, name FROM observations FINAL WHERE 1 ${scoped(projectId)}) o
       ON o.trace_id = se.trace_id AND o.observation_id = se.observation_id
     GROUP BY type, name ORDER BY events DESC LIMIT 8`);
 
@@ -169,6 +173,9 @@ export async function reviewQueue(range?: string, projectId?: string) {
 // ---------------- Sessions ----------------
 export async function sessions(range?: string, projectId?: string) {
   const ts = since(range, "t.timestamp") + scoped(projectId, "t.project_id");
+  // obs/sec subqueries are scoped by project too — trace_id alone isn't a
+  // safe join key across tenants (see tracesList below for why).
+  const pj = scoped(projectId);
   return q(`
     SELECT t.session_id AS session_id, t.user_id AS user_id,
            count() AS traces,
@@ -178,28 +185,40 @@ export async function sessions(range?: string, projectId?: string) {
            sum(obs.tokens) AS tokens, sum(sec.n_events) AS events,
            max(sec.max_sev) AS max_sev
     FROM (SELECT * FROM traces FINAL) t
-    LEFT JOIN (SELECT trace_id, count() AS n_obs, sum(input_tokens+output_tokens) AS tokens, sum(cost_usd) AS cost FROM observations FINAL GROUP BY trace_id) obs ON obs.trace_id=t.trace_id
-    LEFT JOIN (SELECT trace_id, count() AS n_events, max(severity) AS max_sev FROM security_events FINAL GROUP BY trace_id) sec ON sec.trace_id=t.trace_id
+    LEFT JOIN (SELECT trace_id, count() AS n_obs, sum(input_tokens+output_tokens) AS tokens, sum(cost_usd) AS cost FROM observations FINAL WHERE 1 ${pj} GROUP BY trace_id) obs ON obs.trace_id=t.trace_id
+    LEFT JOIN (SELECT trace_id, count() AS n_events, max(severity) AS max_sev FROM security_events FINAL WHERE 1 ${pj} GROUP BY trace_id) sec ON sec.trace_id=t.trace_id
     WHERE t.session_id != '' ${ts}
     GROUP BY session_id, user_id ORDER BY last_seen DESC LIMIT 100`);
 }
 
 // ---------------- Traces ----------------
 export async function tracesList(range?: string, limit = 100, projectId?: string) {
+  // obs/sec subqueries are scoped by project too, not just trace_id: trace_id
+  // is caller-supplied and NOT guaranteed unique across tenants (e.g. every
+  // onboarding client's "hello world" test used to share a literal trace_id —
+  // fixed separately, but the query must not rely on that). Without this,
+  // one project's row can silently sum in another project's spans/tokens/
+  // cost/latency/security-event counts whenever two trace_ids collide.
+  const pj = scoped(projectId);
   return q(`
     SELECT t.trace_id AS trace_id, t.name AS name, t.environment AS environment,
            toString(t.timestamp) AS timestamp, t.session_id AS session_id,
            obs.n_obs AS observations, obs.tokens AS tokens, obs.cost AS cost,
            obs.latency AS latency_ms,
            sec.n_events AS sec_events, sec.max_sev AS sec_max_severity
-    FROM (SELECT * FROM traces FINAL WHERE 1 ${since(range, "timestamp")}${scoped(projectId)}) t
+    FROM (SELECT * FROM traces FINAL WHERE 1 ${since(range, "timestamp")}${pj}) t
     LEFT JOIN (
       SELECT trace_id, count() AS n_obs, sum(input_tokens+output_tokens) AS tokens,
              sum(cost_usd) AS cost,
-             dateDiff('millisecond', min(start_time), max(assumeNotNull(end_time))) AS latency
-      FROM observations FINAL GROUP BY trace_id
+             -- assumeNotNull on a genuinely-null end_time silently returns the
+             -- type's zero value (1970-01-01), producing a nonsensical deeply
+             -- negative latency for spans with no end_time (e.g. a one-shot
+             -- test message). Fall back to the span's own start_time instead,
+             -- which degrades to a sane "0 ms" rather than garbage.
+             dateDiff('millisecond', min(start_time), max(coalesce(end_time, start_time))) AS latency
+      FROM observations FINAL WHERE 1 ${pj} GROUP BY trace_id
     ) obs ON obs.trace_id = t.trace_id
-    LEFT JOIN (SELECT trace_id, count() AS n_events, max(severity) AS max_sev FROM security_events FINAL GROUP BY trace_id) sec ON sec.trace_id = t.trace_id
+    LEFT JOIN (SELECT trace_id, count() AS n_events, max(severity) AS max_sev FROM security_events FINAL WHERE 1 ${pj} GROUP BY trace_id) sec ON sec.trace_id = t.trace_id
     ORDER BY t.timestamp DESC LIMIT ${Number(limit)}`);
 }
 

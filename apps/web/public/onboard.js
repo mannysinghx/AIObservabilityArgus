@@ -84,20 +84,30 @@ function flashCopied(btn) {
 // in HOWTO below, rendered as visible numbered steps, not buried in code
 // where it's easy to skip past.
 
+// Trace/observation IDs are unique per project (suffixed with a slice of the
+// project's own UUID), not a shared literal like "tr_hello_world" — two
+// different clients' test traces must never collide, since Argus can't
+// assume trace IDs are globally unique across tenants.
+function testIds() {
+  const suffix = project.projectId.replace(/-/g, "").slice(0, 10);
+  return { traceId: `tr_hello_${suffix}`, obsId: `obs_hello_${suffix}` };
+}
+
 function curlSnippet() {
   const ts = new Date().toISOString();
+  const { traceId, obsId } = testIds();
   return `curl -X POST '${project.ingestUrl}' \\
   -u '${project.publicKey}:${project.secretKey}' \\
   -H 'content-type: application/json' \\
   -d '{
     "traces": [{
-      "traceId": "tr_hello_world",
+      "traceId": "${traceId}",
       "name": "smoke-test",
       "timestamp": "${ts}"
     }],
     "observations": [{
-      "observationId": "obs_hello_world",
-      "traceId": "tr_hello_world",
+      "observationId": "${obsId}",
+      "traceId": "${traceId}",
       "type": "generation",
       "name": "greeting",
       "model": "gpt-4.1",
@@ -109,6 +119,7 @@ function curlSnippet() {
 }
 
 function nodeSnippet() {
+  const { traceId, obsId } = testIds();
   return `const INGEST_URL = "${project.ingestUrl}";
 const AUTH = "Basic " + Buffer.from("${project.publicKey}:${project.secretKey}").toString("base64");
 
@@ -118,10 +129,10 @@ async function sendTrace() {
     method: "POST",
     headers: { "content-type": "application/json", authorization: AUTH },
     body: JSON.stringify({
-      traces: [{ traceId: "tr_hello_world", name: "smoke-test", timestamp: now }],
+      traces: [{ traceId: "${traceId}", name: "smoke-test", timestamp: now }],
       observations: [{
-        observationId: "obs_hello_world",
-        traceId: "tr_hello_world",
+        observationId: "${obsId}",
+        traceId: "${traceId}",
         type: "generation",
         name: "greeting",
         model: "gpt-4.1",
@@ -137,6 +148,7 @@ sendTrace();`;
 }
 
 function pythonSnippet() {
+  const { traceId, obsId } = testIds();
   return `import base64, json, urllib.request
 from datetime import datetime, timezone
 
@@ -145,10 +157,10 @@ AUTH = "Basic " + base64.b64encode(b"${project.publicKey}:${project.secretKey}")
 
 now = datetime.now(timezone.utc).isoformat()
 batch = {
-    "traces": [{"traceId": "tr_hello_world", "name": "smoke-test", "timestamp": now}],
+    "traces": [{"traceId": "${traceId}", "name": "smoke-test", "timestamp": now}],
     "observations": [{
-        "observationId": "obs_hello_world",
-        "traceId": "tr_hello_world",
+        "observationId": "${obsId}",
+        "traceId": "${traceId}",
         "type": "generation",
         "name": "greeting",
         "model": "gpt-4.1",

@@ -47,6 +47,7 @@ class Trace {
     this.meta = meta;
     this.startedAt = new Date();
     this.observations = [];
+    this.obsCount = 0; // total ever recorded (survives flushObservations)
     this.finished = false;
     this.environment =
       meta.environment || (cfg && cfg.environment) || "production";
@@ -153,6 +154,7 @@ class Trace {
     if (!this.observations.length) return;
     const pending = this.observations;
     this.observations = [];
+    this.obsCount += pending.length;
     enqueueObservations(pending);
   }
 
@@ -165,6 +167,10 @@ class Trace {
     this.flushObservations();
     if (this.finished) return;
     this.finished = true;
+    // A request that recorded nothing worth observing (no LLM call, retrieval,
+    // or tool) is not a trace — skip the summary so per-request middleware on a
+    // busy app doesn't emit empty traces for every static/asset hit.
+    if (this.obsCount === 0) return;
     const meta = this.meta;
     enqueueTrace({
       traceId: this.traceId,

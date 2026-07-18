@@ -282,6 +282,17 @@ async function main() {
     assert.strictEqual(gens[0].model, "gpt-4o-mini");
   });
 
+  await check("a trace scope with no LLM calls emits nothing (no empty traces)", async () => {
+    reset();
+    await argus.trace("request.no-llm", async () => {
+      // simulate a plain request that never touches an LLM
+      await sleep(1);
+    });
+    await settle();
+    assert.strictEqual(received.traces.length, 0, "emitted an empty trace summary");
+    assert.strictEqual(received.observations.length, 0, "emitted stray observations");
+  });
+
   await check("does not send anything when keys are absent", async () => {
     // Re-init disabled in a child-like fashion: flip config to disabled.
     const cfg = require("../src/config");

@@ -187,14 +187,14 @@ const HOWTO = {
   node: [
     "This runs as a quick standalone test — it doesn't need to be anywhere near your real app, your own laptop is fine.",
     "Copy the code below.",
-    "Save it into a new file named <code>argus-test.js</code> (any folder is fine).",
+    "Save it into a new file named <code>argus-test.js</code> (any folder is fine) using a <b>plain-text or code editor</b> (VS Code, Notepad, nano) — not TextEdit's default Rich Text mode, which will break it. Easiest: in a terminal, run <code>nano argus-test.js</code>, paste, then press <code>Ctrl+O</code>, Enter, <code>Ctrl+X</code>.",
     "Open a terminal in that same folder, then run the command underneath the code.",
     "Requires Node.js 18 or newer — check with <code>node -v</code>.",
   ],
   python: [
     "This runs as a quick standalone test — it doesn't need to be anywhere near your real app, your own laptop is fine.",
     "Copy the code below.",
-    "Save it into a new file named <code>argus_test.py</code> (any folder is fine).",
+    "Save it into a new file named <code>argus_test.py</code> (any folder is fine) using a <b>plain-text or code editor</b> (VS Code, Notepad, nano) — not TextEdit's default Rich Text mode, which will break it. Easiest: in a terminal, run <code>nano argus_test.py</code>, paste, then press <code>Ctrl+O</code>, Enter, <code>Ctrl+X</code>.",
     "Open a terminal in that same folder, then run the command underneath the code.",
     "Requires Python 3 — check with <code>python3 --version</code>.",
   ],

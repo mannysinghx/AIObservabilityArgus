@@ -1,0 +1,38 @@
+{
+  "name": "@argus/node",
+  "version": "0.1.0",
+  "description": "Drop-in auto-instrumenting tracer for Argus — security-first AI observability. One line captures every LLM call.",
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "./src/index.js",
+  "types": "./src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.mjs",
+      "require": "./src/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node test/run.js"
+  },
+  "keywords": [
+    "argus",
+    "observability",
+    "llm",
+    "tracing",
+    "openai",
+    "anthropic",
+    "prompt-injection",
+    "ai-security"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "sideEffects": false
+}

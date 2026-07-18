@@ -14,6 +14,12 @@
  * Only the tracer calls are new; everything else is a plausible stand-in for
  * autogovern.io's actual server.js logic so you can see exactly where the
  * three recordX() calls slot into code that already exists.
+ *
+ * NOTE: This is the manual, zero-dependency approach. For most apps the drop-in
+ * @argus/node SDK is simpler — it captures LLM calls automatically, so you only
+ * write the retrieval/tool one-liners. See sdk-integration-example.js for the
+ * same workflow wired that way. This file remains supported for teams who'd
+ * rather not add a dependency.
  */
 
 const express = require("express");

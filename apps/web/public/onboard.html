@@ -76,6 +76,14 @@
     .runline .keybox { flex: 1; }
     .next-note { padding: calc(var(--u)*2.2) calc(var(--u)*3.2); font-size: 12px; color: var(--ink-muted); border-top: 1px solid var(--line); }
     .next-note a { color: var(--accent); }
+    .next-note code { font-family: var(--font-mono); font-size: 11px; background: var(--surface-2); border-radius: 4px; padding: 1px 5px; }
+    /* SDK-first tab body */
+    .tab-block { padding: calc(var(--u)*2.6) calc(var(--u)*3.2) calc(var(--u)*1); display: grid; gap: calc(var(--u)*2.6); }
+    .code-label { font-size: 11.5px; font-weight: 600; color: var(--ink); display: flex; align-items: center; gap: 8px; margin-bottom: -6px; }
+    .code-label .step-num { display: inline-flex; align-items: center; justify-content: center; width: 17px; height: 17px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 10.5px; font-weight: 700; flex: none; }
+    .setup-line { display: flex; align-items: center; gap: 8px; }
+    .setup-line .lbl { font-size: 11.5px; font-weight: 600; color: var(--ink-faint); flex: none; width: 52px; }
+    .setup-line .keybox { flex: 1; }
   </style>
 </head>
 <body>
@@ -141,24 +149,16 @@
   <!-- STEP 3 -->
   <section class="view-step" id="step3">
     <div class="card">
-      <div class="card-head"><span class="card-title">3. Test your connection</span></div>
-      <div class="intro-note">This step just proves your API key works — it sends <b>one harmless test message</b>, nothing from your real app. Run it from <b>any computer with internet access</b>, including this laptop — it doesn't matter if your real app lives elsewhere (Azure, AWS, a VM, Railway, Vercel, wherever). Pick how you want to send it below, follow the numbered steps, then check the status underneath.</div>
+      <div class="card-head"><span class="card-title">3. Connect your app</span></div>
+      <div class="intro-note">This is your <b>real integration</b> — the same two lines stay in your app for good, and from then on <b>every LLM call is tracked automatically</b>, no per-call code. Pick your framework, follow the numbered steps, deploy, and use your app once for real. <span class="dim">Just want to prove your key works first, with no code? Use the <b>Quick test</b> tab.</span></div>
       <div class="tabs" id="snippetTabs">
-        <button class="tab-btn active" data-tab="curl" type="button">Terminal (cURL)</button>
-        <button class="tab-btn" data-tab="node" type="button">Node.js</button>
-        <button class="tab-btn" data-tab="python" type="button">Python</button>
-        <button class="tab-btn" data-tab="otlp" type="button"><span class="tab-advanced">OpenTelemetry (advanced)</span></button>
+        <button class="tab-btn active" data-tab="express" type="button">Express</button>
+        <button class="tab-btn" data-tab="next" type="button">Next.js</button>
+        <button class="tab-btn" data-tab="node" type="button">Node (other)</button>
+        <button class="tab-btn" data-tab="curl" type="button"><span class="tab-advanced">Quick test (no code)</span></button>
       </div>
-      <div class="howto"><ol id="howtoList"></ol></div>
-      <div class="snippet-wrap">
-        <button class="copy-btn snippet-copy" data-copy-snippet="1" type="button">Copy</button>
-        <pre class="snippet" id="snippetOut"></pre>
-      </div>
-      <div class="runline" id="runLine" style="display:none">
-        <span class="lbl">Then run:</span>
-        <div class="keybox"><span id="runCmdOut"></span><button class="copy-btn" data-copy="runCmdOut" type="button">Copy</button></div>
-      </div>
-      <div class="next-note">This only tests the connection — it doesn't touch your real app. To track your <b>actual</b> app, wherever it's deployed (Azure, AWS, a VM, Railway, Vercel, etc.), add this same kind of code into its real source and redeploy it the way you normally do — a <code>git push</code>, your platform's deploy command, or a service restart. There's no separate access to Argus required for that. See the full <a href="/?guide=onboarding" target="_blank">step-by-step integration guide</a> for exactly where the code goes.</div>
+      <div id="tabBody"></div>
+      <div class="next-note">That's the whole integration — no per-call code. Retrieval and tool steps are optional one-liners: <code>argus.retrieval(name, text)</code> and <code>argus.tool(name, {input, output})</code>. Your app can be deployed <b>anywhere</b> (Railway, Vercel, Azure, AWS, a VM) — Argus just needs the two keys in its environment. Full walkthrough: <a href="/?guide=onboarding" target="_blank">the step-by-step integration guide</a>.</div>
     </div>
 
     <div class="card">

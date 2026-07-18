@@ -57,20 +57,17 @@ $("#createBtn").addEventListener("click", async () => {
 // ---------- Step 2 -> 3 ----------
 $("#savedBtn").addEventListener("click", () => {
   showStep(3);
-  renderSnippet("curl");
+  renderTab("express");
   startPolling();
 });
 
-// ---------- copy buttons ----------
+// ---------- copy buttons (delegated; works for any [data-copy] target id) ----------
 document.addEventListener("click", (e) => {
   const btn = e.target.closest("[data-copy]");
   if (!btn) return;
-  const text = $(`#${btn.dataset.copy}`).textContent;
-  navigator.clipboard?.writeText(text).then(() => flashCopied(btn));
-});
-$("#snippetTabs").parentElement.querySelector(".snippet-copy").addEventListener("click", (e) => {
-  const text = $("#snippetOut").textContent;
-  navigator.clipboard?.writeText(text).then(() => flashCopied(e.target));
+  const target = $(`#${btn.dataset.copy}`);
+  if (!target) return;
+  navigator.clipboard?.writeText(target.textContent).then(() => flashCopied(btn));
 });
 function flashCopied(btn) {
   const orig = btn.textContent;
@@ -79,159 +76,152 @@ function flashCopied(btn) {
   setTimeout(() => { btn.textContent = orig; btn.classList.remove("copied"); }, 1400);
 }
 
-// ---------- snippets ----------
-// Kept free of "how to run this" comments on purpose — that explanation lives
-// in HOWTO below, rendered as visible numbered steps, not buried in code
-// where it's easy to skip past.
+// ---------- Step 3: the real, SDK-first integration ----------
+// The drop-in @argus/node SDK is the actual integration — the same two lines
+// stay in the app permanently. Each framework tab shows: install, env vars
+// (pre-filled with this project's keys), and the code. The "curl" tab is a
+// throwaway connectivity check for people who want to see the key light up
+// before touching their app.
 
-// Trace/observation IDs are unique per project (suffixed with a slice of the
-// project's own UUID), not a shared literal like "tr_hello_world" — two
-// different clients' test traces must never collide, since Argus can't
-// assume trace IDs are globally unique across tenants.
-function testIds() {
-  const suffix = project.projectId.replace(/-/g, "").slice(0, 10);
-  return { traceId: `tr_hello_${suffix}`, obsId: `obs_hello_${suffix}` };
+// Pre-filled environment block, shared by every SDK tab.
+function envBlock() {
+  return `ARGUS_PUBLIC_KEY=${project.publicKey}
+ARGUS_SECRET_KEY=${project.secretKey}
+ARGUS_INGEST_URL=${project.ingestUrl}`;
 }
 
+const EXPRESS_CODE = `// 1) At the very top of your entry file (app.js / server.js),
+//    before you create any LLM clients:
+const argus = require("@argus/node").init();
+
+// 2) Right after you create your Express app:
+app.use(argus.middleware());
+
+// Done. Every OpenAI / Anthropic / OpenAI-compatible call in a
+// request is now captured and grouped into one trace — no per-call code.`;
+
+const NEXT_CODE = `// lib/argus.js — import once so init() runs at startup
+const argus = require("@argus/node").init();
+module.exports = argus;
+
+// In each route handler, wrap the work and flush before returning
+// (serverless functions can freeze the instant they respond):
+const argus = require("@argus/node");
+
+export async function POST(req) {
+  return argus.trace("chat", async () => {
+    const result = await handleRequest(req);
+    await argus.flush();
+    return Response.json(result);
+  });
+}`;
+
+const NODE_CODE = `// At startup, before creating LLM clients:
+const argus = require("@argus/node").init();
+
+// Wrap each job / request so its LLM calls group into one trace:
+await argus.trace("summarize-job", async () => {
+  // ...your existing code — LLM calls here are captured automatically
+});
+// (A standalone call outside any trace() is still captured — one trace each.)`;
+
+// Throwaway connectivity check. Trace/observation IDs are unique per project
+// (suffixed with a slice of the project's UUID), never a shared literal — two
+// clients' test traces must never collide, since Argus can't assume trace IDs
+// are globally unique across tenants.
 function curlSnippet() {
   const ts = new Date().toISOString();
-  const { traceId, obsId } = testIds();
+  const suffix = project.projectId.replace(/-/g, "").slice(0, 10);
   return `curl -X POST '${project.ingestUrl}' \\
   -u '${project.publicKey}:${project.secretKey}' \\
   -H 'content-type: application/json' \\
   -d '{
-    "traces": [{
-      "traceId": "${traceId}",
-      "name": "smoke-test",
-      "timestamp": "${ts}"
-    }],
+    "traces": [{ "traceId": "tr_hello_${suffix}", "name": "smoke-test", "timestamp": "${ts}" }],
     "observations": [{
-      "observationId": "${obsId}",
-      "traceId": "${traceId}",
-      "type": "generation",
-      "name": "greeting",
-      "model": "gpt-4.1",
-      "role": "assistant",
-      "output": "Hello from Argus!",
-      "startTime": "${ts}"
+      "observationId": "obs_hello_${suffix}",
+      "traceId": "tr_hello_${suffix}",
+      "type": "generation", "name": "greeting", "model": "gpt-4.1",
+      "role": "assistant", "output": "Hello from Argus!", "startTime": "${ts}"
     }]
   }'`;
 }
 
-function nodeSnippet() {
-  const { traceId, obsId } = testIds();
-  return `const INGEST_URL = "${project.ingestUrl}";
-const AUTH = "Basic " + Buffer.from("${project.publicKey}:${project.secretKey}").toString("base64");
-
-async function sendTrace() {
-  const now = new Date().toISOString();
-  await fetch(INGEST_URL, {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: AUTH },
-    body: JSON.stringify({
-      traces: [{ traceId: "${traceId}", name: "smoke-test", timestamp: now }],
-      observations: [{
-        observationId: "${obsId}",
-        traceId: "${traceId}",
-        type: "generation",
-        name: "greeting",
-        model: "gpt-4.1",
-        role: "assistant",
-        output: "Hello from Argus!",
-        startTime: now,
-      }],
-    }),
-  });
-}
-
-sendTrace();`;
-}
-
-function pythonSnippet() {
-  const { traceId, obsId } = testIds();
-  return `import base64, json, urllib.request
-from datetime import datetime, timezone
-
-INGEST_URL = "${project.ingestUrl}"
-AUTH = "Basic " + base64.b64encode(b"${project.publicKey}:${project.secretKey}").decode()
-
-now = datetime.now(timezone.utc).isoformat()
-batch = {
-    "traces": [{"traceId": "${traceId}", "name": "smoke-test", "timestamp": now}],
-    "observations": [{
-        "observationId": "${obsId}",
-        "traceId": "${traceId}",
-        "type": "generation",
-        "name": "greeting",
-        "model": "gpt-4.1",
-        "role": "assistant",
-        "output": "Hello from Argus!",
-        "startTime": now,
-    }],
-}
-
-req = urllib.request.Request(
-    INGEST_URL,
-    data=json.dumps(batch).encode(),
-    headers={"content-type": "application/json", "authorization": AUTH},
-    method="POST",
-)
-urllib.request.urlopen(req, timeout=10)`;
-}
-
-function otlpSnippet() {
-  const otlpUrl = project.ingestUrl.replace(/\/api\/public\/ingestion$/, "/v1/traces");
-  return `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=${otlpUrl}
-OTEL_EXPORTER_OTLP_TRACES_HEADERS=authorization=Basic ${btoa(`${project.publicKey}:${project.secretKey}`)}`;
-}
-
-const SNIPPETS = { curl: curlSnippet, node: nodeSnippet, python: pythonSnippet, otlp: otlpSnippet };
-
-// Plain-language "what do I do with this" steps, shown above the code —
-// this is the part that was missing before: a snippet with no instructions
-// leaves anyone unsure whether to paste it into a terminal, a file, or
-// their app. Each tab spells out exactly where it goes and how to run it.
-const HOWTO = {
-  curl: [
-    "Open a terminal on <b>any computer with internet access</b> — your own laptop is fine, it doesn't need to be where your app runs. <b>Terminal</b> on Mac/Linux, <b>Command Prompt</b> or <b>PowerShell</b> on Windows.",
-    "Copy the command below, paste it into the terminal, and press <b>Enter</b>.",
-  ],
-  node: [
-    "This runs as a quick standalone test — it doesn't need to be anywhere near your real app, your own laptop is fine.",
-    "Copy the code below.",
-    "Save it into a new file named <code>argus-test.js</code> (any folder is fine) using a <b>plain-text or code editor</b> (VS Code, Notepad, nano) — not TextEdit's default Rich Text mode, which will break it. Easiest: in a terminal, run <code>nano argus-test.js</code>, paste, then press <code>Ctrl+O</code>, Enter, <code>Ctrl+X</code>.",
-    "Open a terminal in that same folder, then run the command underneath the code.",
-    "Requires Node.js 18 or newer — check with <code>node -v</code>.",
-  ],
-  python: [
-    "This runs as a quick standalone test — it doesn't need to be anywhere near your real app, your own laptop is fine.",
-    "Copy the code below.",
-    "Save it into a new file named <code>argus_test.py</code> (any folder is fine) using a <b>plain-text or code editor</b> (VS Code, Notepad, nano) — not TextEdit's default Rich Text mode, which will break it. Easiest: in a terminal, run <code>nano argus_test.py</code>, paste, then press <code>Ctrl+O</code>, Enter, <code>Ctrl+X</code>.",
-    "Open a terminal in that same folder, then run the command underneath the code.",
-    "Requires Python 3 — check with <code>python3 --version</code>.",
-  ],
-  otlp: [
-    "Only use this if your app already sends data with OpenTelemetry — otherwise use one of the other tabs.",
-    "Add the two lines below to your app's environment configuration (e.g. a <code>.env</code> file, or your hosting platform's environment variable settings).",
-    "Restart your application. No code changes needed.",
-  ],
+const TABS = {
+  express: {
+    env: true,
+    install: "npm install @argus/node",
+    codeLabel: "Add two lines to your app",
+    code: () => EXPRESS_CODE,
+    howto: [
+      "In a terminal, in your app's project folder, run the install command below.",
+      "Put your keys where your app reads config — a <code>.env</code> file locally, or your host's environment-variable settings (Railway, Vercel, Azure, AWS…). They're pre-filled below.",
+      "Add the two lines of code below: the <code>init()</code> line at the very top of your entry file, the <code>middleware()</code> line right after you create your Express app.",
+      "Deploy the way you always do (<code>git push</code> / your platform's deploy / a restart), then use your app once for real — watch the status below flip to <b>Connected</b>.",
+    ],
+  },
+  next: {
+    env: true,
+    install: "npm install @argus/node",
+    codeLabel: "Wire it into your route handlers",
+    code: () => NEXT_CODE,
+    howto: [
+      "In your project folder, run the install command below.",
+      "Add your keys to your host's <b>Production</b> environment variables (pre-filled below). On Vercel, <b>redeploy after adding them</b> — new vars only apply to a fresh deploy.",
+      "Add the <code>init()</code> line once at startup, then wrap each route handler as shown. Keep the <code>argus.flush()</code> before you return — serverless functions can freeze the moment they respond.",
+      "Deploy, trigger a real request, and watch the status below.",
+    ],
+  },
+  node: {
+    env: true,
+    install: "npm install @argus/node",
+    codeLabel: "Initialize and wrap your work",
+    code: () => NODE_CODE,
+    howto: [
+      "In your project folder, run the install command below.",
+      "Set the environment variables (pre-filled below) wherever your process reads config.",
+      "Add the <code>init()</code> line at startup, and wrap each unit of work in <code>argus.trace()</code> as shown.",
+      "Run your app for real; watch the status below.",
+    ],
+  },
+  curl: {
+    env: false,
+    install: "",
+    codeLabel: "Paste this into a terminal",
+    code: curlSnippet,
+    howto: [
+      "Open a terminal on <b>any computer with internet access</b> — it doesn't need to be where your app runs.",
+      "Copy the command below, paste it, and press <b>Enter</b>. This sends one harmless test message to prove your key works — it touches nothing in your real app. <span class=\"dim\">When you're ready for the real thing, switch to your framework's tab.</span>",
+    ],
+  },
 };
-const RUN_CMD = { curl: "", node: "node argus-test.js", python: "python3 argus_test.py", otlp: "" };
 
-function renderSnippet(tab) {
-  document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
-  $("#snippetOut").textContent = SNIPPETS[tab]();
-  $("#howtoList").innerHTML = HOWTO[tab].map((step) => `<li>${step}</li>`).join("");
-  const runCmd = RUN_CMD[tab];
-  const runLine = $("#runLine");
-  if (runCmd) {
-    $("#runCmdOut").textContent = runCmd;
-    runLine.style.display = "flex";
-  } else {
-    runLine.style.display = "none";
-  }
+function codeBlock(label, id, text) {
+  return `<div class="field">
+      <div class="code-label">${label}</div>
+      <div class="snippet-wrap">
+        <button class="copy-btn snippet-copy" data-copy="${id}" type="button">Copy</button>
+        <pre class="snippet" id="${id}">${esc(text)}</pre>
+      </div>
+    </div>`;
 }
-document.querySelectorAll(".tab-btn").forEach((b) => b.addEventListener("click", () => renderSnippet(b.dataset.tab)));
+
+function renderTab(tab) {
+  document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
+  const cfg = TABS[tab];
+  const parts = [];
+  parts.push(`<div class="howto"><ol>${cfg.howto.map((s) => `<li>${s}</li>`).join("")}</ol></div>`);
+  parts.push(`<div class="tab-block">`);
+  if (cfg.install) {
+    parts.push(
+      `<div class="setup-line"><span class="lbl">Install</span><div class="keybox"><span id="cInstall">${esc(cfg.install)}</span><button class="copy-btn" data-copy="cInstall" type="button">Copy</button></div></div>`,
+    );
+  }
+  if (cfg.env) parts.push(codeBlock("Environment variables", "cEnv", envBlock()));
+  parts.push(codeBlock(cfg.codeLabel, "cCode", cfg.code()));
+  parts.push(`</div>`);
+  $("#tabBody").innerHTML = parts.join("");
+}
+document.querySelectorAll(".tab-btn").forEach((b) => b.addEventListener("click", () => renderTab(b.dataset.tab)));
 
 // ---------- Step 3: live connection status ----------
 function startPolling() {

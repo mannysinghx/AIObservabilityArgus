@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "argus-tracer"
+version = "0.1.0"
+description = "Drop-in auto-instrumenting tracer for Argus — security-first AI observability"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+keywords = ["argus", "observability", "llm", "tracing", "openai", "anthropic", "ai-security"]
+dependencies = []   # stdlib only; auto-instruments openai/anthropic if present
+
+[project.urls]
+Homepage = "https://github.com/mannysinghx/AIObservabilityArgus"
+
+[tool.setuptools]
+packages = ["argus"]

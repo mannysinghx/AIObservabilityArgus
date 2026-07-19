@@ -50,24 +50,21 @@ function install() {
       } catch (err) {
         log("stream decision failed", err);
       }
-      if (isStream) {
-        // Streaming: capture strictly off the caller's path — never buffer the
-        // stream on their behalf. Return the response immediately.
-        try {
-          captureStreaming(meta, startedAt, res);
-        } catch (err) {
-          log("fetch stream capture error", err);
-        }
-        return res;
+      // Capture strictly OFF the caller's path — for both streaming and JSON.
+      // We read a clone in the background and hand the untouched response back
+      // immediately. Blocking on the clone before the caller reads the original
+      // can deadlock/abort undici's shared-body backpressure (the caller can't
+      // read until we finish, and our clone can't finish until the caller
+      // reads), which silently loses the response body. Recording a beat later
+      // is fine: it still lands well before the request ends and the trace
+      // closes.
+      try {
+        if (isStream) captureStreaming(meta, startedAt, res);
+        else captureJson(meta, startedAt, res);
+      } catch (err) {
+        log("fetch capture error", err);
       }
-      // Non-streaming: the body is already buffered by the time the response
-      // resolves, so recording the observation before we hand the response back
-      // costs a sub-millisecond parse and keeps observations correctly ordered
-      // within their trace. Any failure still returns the untouched response.
-      return captureJson(meta, startedAt, res).then(
-        () => res,
-        () => res,
-      );
+      return res;
     });
   };
   globalThis.fetch.__argus = true;

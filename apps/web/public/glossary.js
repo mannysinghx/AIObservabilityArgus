@@ -311,6 +311,177 @@ function scoreBlock(score) {
   </div>`;
 }
 
+// ------------------------------------------------------- incident narrative
+// Reconstructs a trace's security story as prose an analyst (or their manager)
+// can read without knowing what "taint" or "L4" mean.
+//
+// Deliberately deterministic and template-driven rather than LLM-written: these
+// narratives end up in incident write-ups, so they must be reproducible, free,
+// instant, and structurally incapable of asserting something the trace doesn't
+// contain. Every clause below is gated on data actually present in the trace.
+
+const _SEV_RANK = { info: 1, low: 2, medium: 3, high: 4, critical: 5 };
+
+// Verbs/nouns that indicate a step reaching outside the system. Matched on whole
+// tokens, never substrings: "compute_total" and "output_parser" both *contain*
+// "put", and calling either one an outbound action would be a false claim in an
+// incident report. Tool naming is app-specific, so a miss costs one sentence
+// while a false hit costs credibility — bias toward missing.
+const _SIDE_EFFECT_WORDS = new Set([
+  "send", "email", "mail", "post", "put", "delete", "write", "create", "update",
+  "payment", "pay", "charge", "refund", "transfer", "webhook", "http", "https",
+  "request", "fetch", "upload", "publish", "notify", "sms", "call", "invoke",
+]);
+
+/** Splits a span name into lowercase word tokens, handling snake_case, kebab,
+ *  dots and camelCase alike ("sendEmail" -> ["send","email"]). */
+function _tokens(name) {
+  return String(name ?? "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean)
+    .map((t) => t.toLowerCase());
+}
+
+const _isSideEffectName = (name) => _tokens(name).some((t) => _SIDE_EFFECT_WORDS.has(t));
+
+const _parseTs = (s) => new Date(String(s ?? "").replace(" ", "T") + (String(s).includes("Z") ? "" : "Z")).getTime();
+
+function _clock(ts) {
+  if (!isFinite(ts)) return "";
+  const d = new Date(ts);
+  return d.toISOString().slice(11, 19) + " UTC";
+}
+
+function _gap(a, b) {
+  const ms = b - a;
+  if (!isFinite(ms) || ms < 0) return "";
+  if (ms < 1000) return `${Math.round(ms)} ms later`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)} seconds later`;
+  return `${Math.round(ms / 60000)} minutes later`;
+}
+
+/**
+ * @param {Array} obs    observations, in start order
+ * @param {Array} events security events on this trace
+ * @returns {{severity:string, category:string, outcome:string, paragraphs:string[], timeline:Array}|null}
+ */
+function buildNarrative(obs, events) {
+  if (!Array.isArray(obs) || !obs.length || !Array.isArray(events) || !events.length) return null;
+
+  // Anchor on the worst finding — that's the story worth telling.
+  const ev = events.slice().sort(
+    (a, b) => (_SEV_RANK[b.severity] || 0) - (_SEV_RANK[a.severity] || 0),
+  )[0];
+  if (!ev) return null;
+
+  const idxOf = (id) => obs.findIndex((o) => o.observation_id === id);
+  const flaggedIdx = idxOf(ev.observation_id);
+  const flagged = flaggedIdx >= 0 ? obs[flaggedIdx] : null;
+
+  // The untrusted source: the span that introduced content the app didn't
+  // control. Must be found *strictly before* the flagged span where possible —
+  // tool spans are untrusted_external by default too, so a naive "nearest
+  // untrusted span" search would pick the flagged action itself and lose the
+  // whole read-then-act chain (exactly the story this product exists to show).
+  const isUntrusted = (o) => o && o.taint === "untrusted_external";
+  const anchor = flaggedIdx >= 0 ? flaggedIdx : obs.length;
+  let srcIdx = -1;
+  for (let i = anchor - 1; i >= 0; i--) {
+    if (isUntrusted(obs[i])) { srcIdx = i; break; }
+  }
+  // Prefer a retrieval over a tool when both precede: a poisoned document is a
+  // more accurate "source" than an intermediate tool call.
+  for (let i = srcIdx - 1; i >= 0; i--) {
+    if (isUntrusted(obs[i]) && obs[i].type === "retrieval") { srcIdx = i; break; }
+  }
+  // Nothing before it: the flagged span is itself where untrusted content came in.
+  if (srcIdx < 0 && isUntrusted(obs[anchor])) srcIdx = anchor;
+  const src = srcIdx >= 0 ? obs[srcIdx] : null;
+
+  // The side-effecting step is what turns "attempted" into real impact. If the
+  // finding itself landed on a side-effecting span after the source, that IS
+  // the action; otherwise look forward from the source.
+  const isSideEffect = (o) => o && (o.type === "tool" || o.type === "generation") && _isSideEffectName(o.name);
+  let actIdx = -1;
+  if (srcIdx >= 0 && flaggedIdx > srcIdx && isSideEffect(obs[flaggedIdx])) {
+    actIdx = flaggedIdx;
+  } else if (srcIdx >= 0) {
+    for (let i = srcIdx + 1; i < obs.length; i++) {
+      if (isSideEffect(obs[i])) { actIdx = i; break; }
+    }
+  }
+  const act = actIdx >= 0 ? obs[actIdx] : null;
+
+  const signals = [...new Set(events.flatMap((e) => e.l4_signals || []))];
+  const info = catInfo(ev.category);
+  const E = _tipEsc;
+  const p = [];
+
+  // 1 — how untrusted content entered.
+  if (src) {
+    const kind = src.type === "retrieval" ? "retrieved a document" : src.type === "tool" ? "called an external tool" : "took in outside content";
+    const t = _parseTs(src.start_time);
+    p.push(`${t ? `At <b>${E(_clock(t))}</b>, y` : "Y"}our application ${kind} in the step named <b>${E(src.name || src.type)}</b>. Argus treats anything coming from outside your app as untrusted, because your code didn't write it and an attacker may have.`);
+  } else if (flagged) {
+    p.push(`The finding is on the step named <b>${E(flagged.name || flagged.type)}</b>.`);
+  }
+
+  // 2 — what the content actually said. Quoting the evidence is the single most
+  // convincing element, so it leads whenever we have it.
+  if (ev.evidence_excerpt) {
+    const quote = String(ev.evidence_excerpt).trim().slice(0, 220);
+    p.push(`That content carried a hidden instruction aimed at your AI rather than at a human reader:<br><span class="nar-quote">${E(quote)}${String(ev.evidence_excerpt).length > 220 ? "…" : ""}</span>`);
+  } else if (info) {
+    p.push(info.what);
+  }
+
+  // 3 — what the agent did next.
+  if (src && act) {
+    const gap = _gap(_parseTs(src.start_time), _parseTs(act.start_time));
+    p.push(`${gap ? E(gap[0].toUpperCase() + gap.slice(1)) + ", y" : "Y"}our agent ran <b>${E(act.name || act.type)}</b> — a step that acts on the outside world. That ordering is what makes this more than a suspicious document: the agent read the instruction, then did something.`);
+  } else if (src && flagged && flaggedIdx > srcIdx) {
+    p.push(`The finding was raised on the later step <b>${E(flagged.name || flagged.type)}</b>, meaning the untrusted content had already entered the conversation by then.`);
+  }
+
+  // 4 — corroborating trace-level signals, in words.
+  if (signals.length) {
+    const said = signals.map((s) => SIGNAL_INFO[s] ? `<b>${E(s)}</b> (${E(SIGNAL_INFO[s].replace(/\.$/, "").toLowerCase())})` : `<b>${E(s)}</b>`);
+    p.push(`Looking across the whole trace, Argus found ${said.length > 1 ? "these signals" : "this signal"}: ${said.join("; ")}.`);
+  }
+
+  // 5 — the verdict, stated only as strongly as the data allows.
+  const outcome = String(ev.outcome || "");
+  if (outcome === "succeeded") {
+    p.push(`<b>The attack appears to have worked.</b> Treat this as a live incident rather than an attempted one.`);
+  } else if (outcome === "blocked") {
+    p.push(`<b>The attempt was blocked</b> before it could take effect.`);
+  } else if (outcome === "attempted") {
+    p.push(`There is <b>no evidence your agent obeyed it</b> — Argus saw the attempt but not the follow-through. Worth confirming in the Output tab before dismissing.`);
+  }
+
+  // Compact timeline of just the steps that carry the story.
+  const keep = new Set([srcIdx, flaggedIdx, actIdx].filter((i) => i >= 0));
+  const timeline = [...keep].sort((a, b) => a - b).map((i) => {
+    const o = obs[i];
+    const role = i === srcIdx ? "untrusted content entered" : i === actIdx ? "acted on the outside world" : "finding raised here";
+    return { time: _clock(_parseTs(o.start_time)), name: o.name || o.type, type: o.type, role };
+  });
+
+  return { severity: ev.severity, category: ev.category, outcome, paragraphs: p, timeline };
+}
+
+/** Renders the narrative as the card shown above the trace waterfall. */
+function narrativeBlock(obs, events) {
+  const n = buildNarrative(obs, events);
+  if (!n || !n.paragraphs.length) return "";
+  const rows = n.timeline.map((t) => `<div class="nar-step"><span class="nar-time mono">${_tipEsc(t.time)}</span><span class="nar-name">${_tipEsc(t.name)}</span><span class="nar-role">${_tipEsc(t.role)}</span></div>`).join("");
+  return `<div class="nar-body">
+    <div class="nar-lead">${n.paragraphs.map((x) => `<p>${x}</p>`).join("")}</div>
+    ${rows ? `<div class="nar-timeline"><div class="nar-tl-head">Sequence</div>${rows}</div>` : ""}
+  </div>`;
+}
+
 // ------------------------------------------------------- floating tooltip
 // A single shared, JS-positioned bubble. Deliberately not a CSS ::after tooltip:
 // most of these chips live inside `overflow:auto` table wrappers, which would

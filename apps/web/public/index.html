@@ -316,6 +316,7 @@
           <h1 class="page-title" style="font-size:16px;">Trace <span class="mono" id="traceIdLabel" style="color:var(--ink-muted)"></span></h1>
           <span id="traceSevPill"></span>
         </div>
+        <div class="card" id="narrativeCard" style="display:none"></div>
         <div class="trace-grid">
           <div class="card">
             <div class="trace-meta" id="traceMeta"></div>
@@ -763,6 +764,13 @@
             <article class="guide-sec" id="g-tracedetail">
               <h2>Trace detail</h2>
               <p>The deepest view in the app — reconstructs one trace's full execution as a waterfall, with a side panel to inspect any individual span. You land here by clicking a trace ID anywhere in the app; the <b>← Back</b> button returns you to wherever you came from.</p>
+              <h3>“What happened” — the incident narrative</h3>
+              <p>When a trace contains security findings, a plain-English summary appears <b>above the waterfall</b>, reconstructing the attack as a short story: which step brought in untrusted content, what that content actually said, what your agent did next and how long afterwards, which trace-level signals fired, and whether it worked. Beside it, a <b>Sequence</b> panel lists just the two or three steps that carry the story, so you can see the shape of the attack before reading anything.</p>
+              <p>It's written to be pasted straight into an incident ticket. Two properties are worth knowing:</p>
+              <ul>
+                <li><b>It never invents anything.</b> Every sentence is generated from data in the trace — no AI writes it, so it can't hallucinate a detail. If Argus didn't observe a follow-up action, the narrative says there's no evidence your agent obeyed, rather than implying impact.</li>
+                <li><b>It's conservative about what counts as an outbound action.</b> A step is only described as “acting on the outside world” when its name clearly says so (<code>send_email</code>, <code>post_webhook</code>, <code>charge_card</code>). An unusually-named tool may be skipped — the waterfall below is always the complete record.</li>
+              </ul>
               <h3>The waterfall</h3>
               <p>One row per span, ordered by start time, with a horizontal bar positioned and sized to scale against the trace's total duration. Row and bar coloring tell the security story at a glance:</p>
               <table class="field-table">

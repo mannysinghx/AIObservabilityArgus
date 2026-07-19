@@ -103,6 +103,7 @@ const dur = (ms) => (ms >= 1000 ? (ms / 1000).toFixed(2) + " s" : Math.round(ms)
   if (typeof signalTip === "undefined") g.signalTip = () => "";
   if (typeof anyTip === "undefined") g.anyTip = () => "";
   if (typeof explainBlock === "undefined") g.explainBlock = () => "";
+  if (typeof narrativeBlock === "undefined") g.narrativeBlock = () => "";
   if (typeof scoreBlock === "undefined") {
     g.scoreBlock = (n) => `<div class="scorebar"><span class="scorebar-val">${esc(String(n ?? 0))}</span><span class="scorebar-scale">/100</span></div>`;
   }
@@ -501,6 +502,14 @@ async function openTrace(id, back) {
     curEvByObs = {}; let maxSev = "none";
     events.forEach((e) => { (curEvByObs[e.observation_id] = curEvByObs[e.observation_id] || []).push(e); maxSev = sevMax(maxSev, e.severity); });
     if (maxSev !== "none") $("#traceSevPill").innerHTML = pill(maxSev);
+    // Plain-English reconstruction of what happened, above the waterfall — the
+    // answer to "what am I looking at?" before any span is clicked.
+    const narr = $("#narrativeCard");
+    if (narr) {
+      const html = narrativeBlock(obs, events);
+      narr.innerHTML = html ? `<div class="card-head"><span class="card-title">What happened</span><span class="card-hint">reconstructed from this trace</span></div>${html}` : "";
+      narr.style.display = html ? "" : "none";
+    }
     const t = d.trace || {};
     const tok = obs.reduce((s, o) => s + Number(o.input_tokens || 0) + Number(o.output_tokens || 0), 0);
     const cost = obs.reduce((s, o) => s + Number(o.cost || 0), 0);

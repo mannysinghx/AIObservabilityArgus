@@ -79,11 +79,6 @@ export async function createProject(
       ],
     );
 
-    await client.query(
-      `INSERT INTO audit_log (actor, action, target) VALUES ($1, $2, $3)`,
-      [userId, "project_created", projectId],
-    );
-
     await client.query("COMMIT");
     return { orgId: targetOrg, projectId, projectName: projectName.trim(), publicKey, secretKey };
   } catch (err) {

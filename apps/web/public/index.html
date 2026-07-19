@@ -107,12 +107,14 @@
       <div class="nav-label">Manage</div>
       <button class="nav-item" type="button" data-nav="keys" id="navKeys"><span class="nav-ico">⚿</span>API Keys</button>
       <button class="nav-item" type="button" data-nav="team"><span class="nav-ico">◍</span>Team</button>
+      <button class="nav-item" type="button" data-nav="audit" id="navAudit"><span class="nav-ico">≡</span>Audit log</button>
     </div>
     <div class="nav-group" id="adminGroup" style="display:none">
       <div class="nav-label">Platform admin</div>
       <button class="nav-item" type="button" data-nav="admin"><span class="nav-ico">◆</span>Platform</button>
       <button class="nav-item" type="button" data-nav="customers"><span class="nav-ico">▤</span>Companies</button>
       <button class="nav-item" type="button" data-nav="adminusers"><span class="nav-ico">◉</span>Users</button>
+      <button class="nav-item" type="button" data-nav="auditall"><span class="nav-ico">≡</span>Audit log</button>
     </div>
     <div class="rail-foot">
       <a class="nav-item" href="/onboard.html" style="text-decoration:none;"><span class="nav-ico">+</span>Connect a new app</a>
@@ -212,6 +214,18 @@
       <section class="view" id="view-adminusers">
         <div class="page-head"><h1 class="page-title">Users</h1><span class="page-sub"><span id="adminUsersSub">loading…</span></span></div>
         <div class="card"><div class="card-head"><span class="card-title">All users</span></div><div class="tablewrap"><table id="adminUsersTable"><tbody><tr><td class="loading">loading…</td></tr></tbody></table></div></div>
+      </section>
+
+      <!-- AUDIT LOG (org-scoped) -->
+      <section class="view" id="view-audit">
+        <div class="page-head"><h1 class="page-title">Audit log</h1><span class="page-sub"><span id="auditSub">loading…</span></span></div>
+        <div class="card"><div class="tablewrap"><table id="auditTable"><tbody><tr><td class="loading">loading…</td></tr></tbody></table></div></div>
+      </section>
+
+      <!-- AUDIT LOG (platform-wide) -->
+      <section class="view" id="view-auditall">
+        <div class="page-head"><h1 class="page-title">Audit log</h1><span class="page-sub">operator view · all customers · <span id="auditAllSub">loading…</span></span></div>
+        <div class="card"><div class="tablewrap"><table id="auditAllTable"><tbody><tr><td class="loading">loading…</td></tr></tbody></table></div></div>
       </section>
 
       <!-- OVERVIEW -->

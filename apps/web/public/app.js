@@ -51,8 +51,9 @@ async function buildSwitcher() {
 function applyRoleUI() {
   const r = ROLE_RANK[PROJECT_ROLE] ?? -1;
   if (PROJECT && r >= 1) $("#manageGroup").style.display = "";
-  const nk = $("#navKeys");
+  const nk = $("#navKeys"), na = $("#navAudit");
   if (nk) nk.style.display = PROJECT && r >= 2 ? "" : "none";
+  if (na) na.style.display = PROJECT && r >= 2 ? "" : "none"; // audit: admin+
 }
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -101,7 +102,7 @@ function breakdown(sel, items, isSev) {
 }
 
 // ---------- routing ----------
-const VIEWS = ["apps", "overview", "threat", "incidents", "review", "redteam", "traces", "trace", "sessions", "analytics", "prompts", "evals", "keys", "team", "admin", "customers", "adminusers", "appearance", "guide"];
+const VIEWS = ["apps", "overview", "threat", "incidents", "review", "redteam", "traces", "trace", "sessions", "analytics", "prompts", "evals", "keys", "team", "audit", "admin", "customers", "adminusers", "auditall", "appearance", "guide"];
 function show(view) {
   VIEWS.forEach((v) => $(`#view-${v}`).classList.toggle("on", v === view));
   document.querySelectorAll(".nav-item[data-nav]").forEach((b) => b.classList.toggle("active", b.dataset.nav === view));
@@ -521,7 +522,58 @@ $("#refreshBtn").addEventListener("click", () => load(document.querySelector(".n
 
 // ---------- loader dispatch ----------
 function load(view) {
-  ({ apps: loadApps, overview: loadOverview, threat: loadThreat, incidents: loadIncidents, review: loadReview, traces: loadTraces, sessions: loadSessions, analytics: loadAnalytics, evals: loadEvals, keys: loadKeys, team: loadTeam, admin: loadAdmin, customers: loadCustomers, adminusers: loadAdminUsers }[view] || (() => {}))();
+  ({ apps: loadApps, overview: loadOverview, threat: loadThreat, incidents: loadIncidents, review: loadReview, traces: loadTraces, sessions: loadSessions, analytics: loadAnalytics, evals: loadEvals, keys: loadKeys, team: loadTeam, audit: loadAudit, admin: loadAdmin, customers: loadCustomers, adminusers: loadAdminUsers, auditall: loadAuditAll }[view] || (() => {}))();
+}
+
+// ---------- Audit log ----------
+const ACTION_LABELS = {
+  "user.signup": "Signed up",
+  "apikey.created": "Created API key", "apikey.revoked": "Revoked API key",
+  "member.invited": "Invited member", "member.role_changed": "Changed member role",
+  "member.removed": "Removed member", "member.invite_revoked": "Revoked invite",
+  "event.verdict_set": "Set security verdict", "project.created": "Created application",
+  "admin.platform_admin_changed": "Changed platform-admin", "admin.user_deleted": "Deleted user",
+  "admin.company_created": "Created company", "admin.company_renamed": "Renamed company",
+  "admin.company_deleted": "Deleted company",
+};
+const actionLabel = (a) => ACTION_LABELS[a] || a;
+function auditDetail(e) {
+  const m = e.metadata || {}, bits = [];
+  if (m.name) bits.push(esc(m.name));
+  if (m.role) bits.push("role: " + esc(m.role));
+  if (m.verdict) bits.push(esc(titleCase(m.verdict)));
+  if (m.publicKey) bits.push(`<span class="mono">${esc(m.publicKey)}</span>`);
+  if (typeof m.value !== "undefined") bits.push(m.value ? "granted" : "revoked");
+  if (typeof m.projectsPurged !== "undefined") bits.push(`${m.projectsPurged} app(s) purged`);
+  if (e.target && !m.name) {
+    const t = String(e.target);
+    bits.push(t.includes("@") ? esc(t) : `<span class="mono dim">${esc(t.slice(0, 13))}${t.length > 13 ? "…" : ""}</span>`);
+  }
+  return bits.join(" · ") || "—";
+}
+function renderAuditRows(rows, showOrg) {
+  if (!rows.length) return '<tbody><tr><td class="empty" style="padding:calc(var(--u)*4)">No activity recorded yet.</td></tr></tbody>';
+  return `<thead><tr><th>When</th><th>Who</th><th>Action</th>${showOrg ? "<th>Company</th>" : ""}<th>Details</th></tr></thead><tbody>` +
+    rows.map((e) => `<tr><td class="dim">${ago(e.at)}</td><td>${esc(e.actorEmail || "—")}</td><td>${esc(actionLabel(e.action))}</td>${showOrg ? `<td class="dim">${esc(e.orgName || "—")}</td>` : ""}<td class="dim">${auditDetail(e)}</td></tr>`).join("") + "</tbody>";
+}
+async function loadAudit() {
+  if (!PROJECT) { banner("Open an application to view its company's audit log."); return; }
+  try {
+    const d = await api("/api/audit"); banner("");
+    const rows = d.entries || [];
+    $("#auditSub").textContent = `${rows.length} recent action${rows.length !== 1 ? "s" : ""} in this company`;
+    $("#auditTable").innerHTML = renderAuditRows(rows, false);
+    stamp();
+  } catch (e) { banner("Audit query failed: " + e.message); }
+}
+async function loadAuditAll() {
+  try {
+    const d = await (await fetch("/api/admin/audit")).json(); banner("");
+    const rows = d.entries || [];
+    $("#auditAllSub").textContent = `${rows.length} recent actions`;
+    $("#auditAllTable").innerHTML = renderAuditRows(rows, true);
+    stamp();
+  } catch (e) { banner("Audit query failed: " + e.message); }
 }
 
 // ---------- Platform admin: overview (all customers) ----------

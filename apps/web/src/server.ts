@@ -7,6 +7,7 @@ import * as Q from "./queries.js";
 import * as Onboarding from "./onboarding.js";
 import * as Auth from "./auth.js";
 import * as Admin from "./admin.js";
+import * as Audit from "./audit.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, "..", "public");
@@ -19,6 +20,13 @@ type ScopedQuery = { range?: string; project?: string };
 type WithUser = { user: Auth.SessionUser | null };
 const asUser = (req: unknown): WithUser => req as unknown as WithUser;
 const userOf = (req: unknown): Auth.SessionUser | null => asUser(req).user;
+
+// Fire-and-forget audit record with the acting user + client IP attached.
+function audit(req: unknown, action: string, opts: Partial<Audit.RecordOpts> = {}): void {
+  const u = userOf(req);
+  const ip = (req as { ip?: string }).ip;
+  void Audit.record(action, { actor: u?.id, actorEmail: u?.email, ip, ...opts });
+}
 
 app.get("/health", async () => ({ status: (await Q.health()) ? "ok" : "degraded", service: "argus-web" }));
 
@@ -54,6 +62,7 @@ app.post<{ Body: { email?: string; password?: string; name?: string; company?: s
     const r = await Auth.signup(email || "", password || "", name || "", company || "");
     if ("error" in r) { reply.code(400).send(r); return; }
     reply.header("set-cookie", Auth.sessionCookie(r.token));
+    void Audit.record("user.signup", { actor: r.user.id, actorEmail: r.user.email, ip: (req as { ip?: string }).ip });
     return { user: r.user };
   },
 );
@@ -185,16 +194,22 @@ app.get("/api/keys", async (req, reply) => {
 
 app.post<{ Body: { project?: string } }>("/api/keys", async (req, reply) => {
   const project = req.body?.project;
-  if (!(await roleGate(req, reply, project, "admin"))) return;
-  try { return await Onboarding.createKey(project!); }
-  catch (err) { app.log.error({ err }, "key create failed"); reply.code(500).send({ error: String(err) }); }
+  const g = await roleGate(req, reply, project, "admin");
+  if (!g) return;
+  try {
+    const key = await Onboarding.createKey(project!);
+    audit(req, "apikey.created", { orgId: g.orgId, targetType: "apikey", target: key.id, metadata: { publicKey: key.publicKey, project } });
+    return key;
+  } catch (err) { app.log.error({ err }, "key create failed"); reply.code(500).send({ error: String(err) }); }
 });
 
 app.delete<{ Params: { id: string }; Querystring: ScopedQuery }>("/api/keys/:id", async (req, reply) => {
   const project = req.query.project;
-  if (!(await roleGate(req, reply, project, "admin"))) return;
+  const g = await roleGate(req, reply, project, "admin");
+  if (!g) return;
   const r = await Onboarding.revokeKey(project!, req.params.id);
   if ("error" in r) { reply.code(400).send(r); return; }
+  audit(req, "apikey.revoked", { orgId: g.orgId, targetType: "apikey", target: req.params.id, metadata: { project } });
   return r;
 });
 
@@ -214,6 +229,7 @@ app.post<{ Body: { project?: string; email?: string; role?: string } }>("/api/me
   const user = userOf(req)!;
   const r = await Auth.inviteMember(g.orgId, req.body?.email || "", req.body?.role || "member", user.id);
   if ("error" in r) { reply.code(400).send(r); return; }
+  audit(req, "member.invited", { orgId: g.orgId, targetType: "member", target: req.body?.email, metadata: { role: req.body?.role || "member" } });
   return r;
 });
 
@@ -222,6 +238,7 @@ app.patch<{ Body: { project?: string; userId?: string; role?: string } }>("/api/
   if (!g) return;
   const r = await Auth.updateMemberRole(g.orgId, req.body?.userId || "", req.body?.role || "");
   if ("error" in r) { reply.code(400).send(r); return; }
+  audit(req, "member.role_changed", { orgId: g.orgId, targetType: "member", target: req.body?.userId, metadata: { role: req.body?.role } });
   return r;
 });
 
@@ -231,9 +248,14 @@ app.post<{ Body: { project?: string; userId?: string; email?: string } }>("/api/
   if (req.body?.userId) {
     const r = await Auth.removeMember(g.orgId, req.body.userId);
     if ("error" in r) { reply.code(400).send(r); return; }
+    audit(req, "member.removed", { orgId: g.orgId, targetType: "member", target: req.body.userId });
     return r;
   }
-  if (req.body?.email) { await Auth.revokeInvite(g.orgId, req.body.email); return { ok: true }; }
+  if (req.body?.email) {
+    await Auth.revokeInvite(g.orgId, req.body.email);
+    audit(req, "member.invite_revoked", { orgId: g.orgId, targetType: "member", target: req.body.email });
+    return { ok: true };
+  }
   reply.code(400).send({ error: "userId or email required" });
 });
 
@@ -254,6 +276,7 @@ app.post<{ Body: { eventId?: string; verdict?: string; project?: string } }>("/a
   try {
     const ok = await Q.setVerdict(eventId, verdict);
     if (!ok) { reply.code(404).send({ error: "event not found" }); return; }
+    audit(req, "event.verdict_set", { orgId: (await Auth.orgIdForProject(project!)) || undefined, targetType: "event", target: eventId, metadata: { verdict, project } });
     return { ok: true, eventId, verdict };
   } catch (err) {
     app.log.error({ err }, "verdict failed");
@@ -290,8 +313,10 @@ app.get("/api/admin/orgs", async (req, reply) => {
 
 app.post<{ Params: { id: string }; Body: { value?: boolean } }>("/api/admin/users/:id/platform-admin", async (req, reply) => {
   if (!requireAdmin(req, reply)) return;
-  const r = await Admin.setPlatformAdmin(req.params.id, req.body?.value === true);
+  const value = req.body?.value === true;
+  const r = await Admin.setPlatformAdmin(req.params.id, value);
   if ("error" in r) { reply.code(400).send(r); return; }
+  audit(req, "admin.platform_admin_changed", { targetType: "user", target: req.params.id, metadata: { value } });
   return r;
 });
 
@@ -300,6 +325,7 @@ app.delete<{ Params: { id: string } }>("/api/admin/users/:id", async (req, reply
   if (req.params.id === userOf(req)!.id) { reply.code(400).send({ error: "You can't delete your own account here." }); return; }
   const r = await Admin.deleteUser(req.params.id);
   if ("error" in r) { reply.code(400).send(r); return; }
+  audit(req, "admin.user_deleted", { targetType: "user", target: req.params.id });
   return r;
 });
 
@@ -307,6 +333,7 @@ app.post<{ Body: { name?: string } }>("/api/admin/orgs", async (req, reply) => {
   if (!requireAdmin(req, reply)) return;
   const r = await Admin.createOrg(req.body?.name || "");
   if ("error" in r) { reply.code(400).send(r); return; }
+  audit(req, "admin.company_created", { orgId: r.id, targetType: "company", target: r.id, metadata: { name: req.body?.name } });
   return r;
 });
 
@@ -314,13 +341,32 @@ app.patch<{ Params: { id: string }; Body: { name?: string } }>("/api/admin/orgs/
   if (!requireAdmin(req, reply)) return;
   const r = await Admin.renameOrg(req.params.id, req.body?.name || "");
   if ("error" in r) { reply.code(400).send(r); return; }
+  audit(req, "admin.company_renamed", { orgId: req.params.id, targetType: "company", target: req.params.id, metadata: { name: req.body?.name } });
   return r;
 });
 
 app.delete<{ Params: { id: string } }>("/api/admin/orgs/:id", async (req, reply) => {
   if (!requireAdmin(req, reply)) return;
-  try { return await Admin.deleteOrg(req.params.id); }
-  catch (err) { app.log.error({ err }, "admin org delete failed"); reply.code(500).send({ error: String(err) }); }
+  try {
+    const r = await Admin.deleteOrg(req.params.id);
+    audit(req, "admin.company_deleted", { targetType: "company", target: req.params.id, metadata: { projectsPurged: r.projectsPurged } });
+    return r;
+  } catch (err) { app.log.error({ err }, "admin org delete failed"); reply.code(500).send({ error: String(err) }); }
+});
+
+// Audit viewers: org-scoped (admin+ of that company) and platform-wide (admin).
+app.get("/api/audit", async (req, reply) => {
+  const project = (req.query as ScopedQuery).project;
+  const g = await roleGate(req, reply, project, "admin");
+  if (!g) return;
+  try { return { entries: await Audit.listByOrg(g.orgId) }; }
+  catch (err) { app.log.error({ err }, "audit failed"); reply.code(503).send({ error: String(err) }); }
+});
+
+app.get("/api/admin/audit", async (req, reply) => {
+  if (!requireAdmin(req, reply)) return;
+  try { return { entries: await Audit.listAll() }; }
+  catch (err) { app.log.error({ err }, "admin audit failed"); reply.code(503).send({ error: String(err) }); }
 });
 
 // ---------------- onboarding (add an app to your org) ----------------
@@ -331,6 +377,7 @@ app.post<{ Body: { projectName?: string; orgId?: string } }>("/api/onboarding/pr
   if (projectName.length > 200) { reply.code(400).send({ error: "projectName must be 200 characters or fewer" }); return; }
   try {
     const project = await Onboarding.createProject(user.id, projectName, req.body?.orgId);
+    audit(req, "project.created", { orgId: project.orgId, targetType: "project", target: project.projectId, metadata: { name: project.projectName } });
     const ingestUrl =
       process.env.ARGUS_PUBLIC_INGEST_URL || "http://localhost:3001/api/public/ingestion";
     return { ...project, ingestUrl };

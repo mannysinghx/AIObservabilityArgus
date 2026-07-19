@@ -252,7 +252,11 @@ export async function analytics(range?: string, projectId?: string) {
            sum(input_tokens) AS input_tokens, sum(output_tokens) AS output_tokens,
            round(avgIf(dateDiff('millisecond',start_time,end_time), end_time IS NOT NULL),0) AS avg_latency_ms,
            round(quantileIf(0.95)(dateDiff('millisecond',start_time,end_time), end_time IS NOT NULL),0) AS p95_latency_ms
-    FROM observations FINAL WHERE 1 ${os}`);
+    FROM observations FINAL WHERE 1 ${os}
+    -- the sum(input_tokens) AS input_tokens alias shadows the input_tokens column
+    -- referenced by sum(input_tokens+output_tokens); prefer the column so ClickHouse
+    -- doesn't nest the aggregates (Aggregate-inside-aggregate error -> 503).
+    SETTINGS prefer_column_name_to_alias = 1`);
   const byModel = await q(`
     SELECT model, count() AS calls, sum(input_tokens) AS input_tokens,
            sum(output_tokens) AS output_tokens, round(sum(cost_usd),4) AS cost,

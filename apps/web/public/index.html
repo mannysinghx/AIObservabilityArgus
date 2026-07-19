@@ -126,7 +126,13 @@
       <button class="ctx" type="button" id="refreshBtn">↻ Refresh</button>
       <span class="page-sub" id="lastUpdated" style="font-size:12px;"></span>
       <div class="cmdk" style="margin-left:auto;">Argus · AI observability &amp; security</div>
-      <span class="avatar">A</span>
+      <div class="menu" id="userMenu" style="margin-left:8px">
+        <button class="avatar" id="userBtn" type="button" title="Account" style="cursor:pointer">A</button>
+        <div class="menu-pop" style="right:0;left:auto;min-width:190px">
+          <div id="userEmail" class="dim" style="padding:9px 12px;font-size:12px;border-bottom:1px solid var(--line)">…</div>
+          <button id="logoutBtn" type="button">Sign out</button>
+        </div>
+      </div>
     </header>
     <div class="status-banner" id="statusBanner"></div>
 

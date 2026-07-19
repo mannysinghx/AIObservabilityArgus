@@ -106,20 +106,15 @@
   <!-- STEP 1 -->
   <section class="view-step on" id="step1">
     <div class="card">
-      <div class="card-head"><span class="card-title">1. Name your project</span></div>
+      <div class="card-head"><span class="card-title">1. Name your application</span></div>
       <div class="pad" style="display:grid; gap: calc(var(--u)*3); padding: calc(var(--u)*3.2);">
         <div class="field">
-          <label for="orgName">Company / organization name</label>
-          <input id="orgName" type="text" placeholder="AutoGovern Inc" maxlength="200" autocomplete="organization">
-          <span class="hint">Used to group projects — you can add more projects to it later via the same flow.</span>
-        </div>
-        <div class="field">
-          <label for="projName">Project name</label>
-          <input id="projName" type="text" placeholder="autogovern.io production" maxlength="200" autocomplete="off">
-          <span class="hint">One project per environment is typical, e.g. "production" and "staging" separately.</span>
+          <label for="projName">Application name</label>
+          <input id="projName" type="text" placeholder="production-api" maxlength="200" autocomplete="off">
+          <span class="hint">Added under your organization. One app per environment is typical, e.g. "production" and "staging" separately.</span>
         </div>
         <div class="actions">
-          <button class="btn btn-primary" id="createBtn" type="button">Create Project &amp; Get API Key</button>
+          <button class="btn btn-primary" id="createBtn" type="button">Create Application &amp; Get API Key</button>
         </div>
       </div>
     </div>

@@ -1,12 +1,6 @@
-import { createHash, randomBytes } from "node:crypto";
-import pg from "pg";
-import { ch, config } from "@argus/shared";
-
-const pool = new pg.Pool({ connectionString: config.databaseUrl, max: 4 });
-
-function sha256(s: string): string {
-  return createHash("sha256").update(s).digest("hex");
-}
+import { randomBytes } from "node:crypto";
+import { ch } from "@argus/shared";
+import { pool, sha256 } from "./db.js";
 
 function genKey(prefix: string): string {
   return `${prefix}-${randomBytes(18).toString("base64url")}`;
@@ -21,25 +15,40 @@ export interface NewProject {
 }
 
 /**
- * Self-service onboarding: create an org + project + API key pair in one
- * shot. No login required — the secret key IS the credential, same model as
- * most single-key API products. Each call creates a fresh org/project, so
- * concurrent clients never collide.
+ * Add an application (project) under one of the signed-in user's organizations,
+ * with a fresh API key pair. The org comes from the caller's membership (given
+ * `orgId` must be one they belong to, otherwise their first org) — so a new app
+ * always lands under the right customer and inherits that org's access.
  */
-export async function createProject(orgName: string, projectName: string): Promise<NewProject> {
+export async function createProject(
+  userId: string,
+  projectName: string,
+  orgId?: string,
+): Promise<NewProject> {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
 
-    const orgRes = await client.query<{ id: string }>(
-      `INSERT INTO organizations (name) VALUES ($1) RETURNING id`,
-      [orgName.trim().slice(0, 200)],
-    );
-    const orgId = orgRes.rows[0].id;
+    // Resolve the target org from the user's memberships.
+    let targetOrg = orgId;
+    if (targetOrg) {
+      const m = await client.query("SELECT 1 FROM memberships WHERE user_id = $1 AND org_id = $2", [
+        userId,
+        targetOrg,
+      ]);
+      if (!m.rowCount) throw new Error("not a member of that organization");
+    } else {
+      const m = await client.query<{ org_id: string }>(
+        "SELECT org_id FROM memberships WHERE user_id = $1 ORDER BY created_at LIMIT 1",
+        [userId],
+      );
+      if (!m.rowCount) throw new Error("user has no organization");
+      targetOrg = m.rows[0].org_id;
+    }
 
     const projRes = await client.query<{ id: string }>(
       `INSERT INTO projects (org_id, name) VALUES ($1, $2) RETURNING id`,
-      [orgId, projectName.trim().slice(0, 200)],
+      [targetOrg, projectName.trim().slice(0, 200)],
     );
     const projectId = projRes.rows[0].id;
 
@@ -72,11 +81,11 @@ export async function createProject(orgName: string, projectName: string): Promi
 
     await client.query(
       `INSERT INTO audit_log (actor, action, target) VALUES ($1, $2, $3)`,
-      ["self-onboarding", "project_created", projectId],
+      [userId, "project_created", projectId],
     );
 
     await client.query("COMMIT");
-    return { orgId, projectId, projectName: projectName.trim(), publicKey, secretKey };
+    return { orgId: targetOrg, projectId, projectName: projectName.trim(), publicKey, secretKey };
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;
@@ -110,15 +119,22 @@ async function chRows<T>(query: string): Promise<T[]> {
   return rs.json<T>();
 }
 
-/** Every org + its projects, joined with per-project ClickHouse KPIs. */
-export async function listProjectsWithStats(): Promise<ProjectStat[]> {
+/**
+ * Every project the given user can see (all orgs they're a member of), joined
+ * with per-project ClickHouse KPIs. Pass the user's org ids; an empty list
+ * returns nothing (no cross-tenant leakage).
+ */
+export async function listProjectsWithStats(orgIds: string[]): Promise<ProjectStat[]> {
+  if (!orgIds.length) return [];
   const { rows: projects } = await pool.query<{
     project_id: string; project_name: string; org_id: string; org_name: string; created_at: Date;
   }>(
     `SELECT p.id AS project_id, p.name AS project_name,
             p.org_id, o.name AS org_name, p.created_at
      FROM projects p JOIN organizations o ON o.id = p.org_id
+     WHERE p.org_id = ANY($1::uuid[])
      ORDER BY o.name, p.created_at`,
+    [orgIds],
   );
 
   // Per-project aggregates from ClickHouse (one grouped query per table, merged

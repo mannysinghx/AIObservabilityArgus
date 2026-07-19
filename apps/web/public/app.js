@@ -501,20 +501,39 @@ function load(view) {
   ({ apps: loadApps, overview: loadOverview, threat: loadThreat, incidents: loadIncidents, review: loadReview, traces: loadTraces, sessions: loadSessions, analytics: loadAnalytics, evals: loadEvals }[view] || (() => {}))();
 }
 
-// ---------- deep link from onboarding: ?guide=onboarding opens the User
-// Guide straight to the "Connect a new app" section ----------
-const GUIDE_DEEP_LINK = new URLSearchParams(location.search).get("guide");
-if (GUIDE_DEEP_LINK === "onboarding") {
-  show("guide");
-  // No need to wait a frame — toggling display:grid via classList.toggle
-  // applies synchronously, and scrollIntoView forces layout on demand.
-  const target = document.getElementById("g-onboarding");
-  if (target) target.scrollIntoView({ behavior: "instant", block: "start" });
-  document.querySelectorAll(".guide-toc .toc-link").forEach((b) => b.classList.toggle("active", b.dataset.scroll === "g-onboarding"));
-} else if (!PROJECT) {
-  // Unscoped (operator) entry lands on the Applications catalog; a customer's
-  // personalized ?project= link lands on that app's Overview.
-  show("apps"); load("apps");
-} else {
-  loadOverview();
+// ---------- auth gate + user menu ----------
+async function requireAuth() {
+  try { const r = await fetch("/api/auth/me"); if (r.ok) return (await r.json()).user; } catch { /* fall through */ }
+  location.href = "/login.html";
+  return null;
 }
+function renderUser(u) {
+  const initial = (u.name || u.email || "?").trim().charAt(0).toUpperCase() || "?";
+  const btn = $("#userBtn"); if (btn) { btn.textContent = initial; btn.title = u.email; }
+  const em = $("#userEmail"); if (em) em.textContent = u.email;
+}
+$("#userBtn")?.addEventListener("click", (e) => { e.stopPropagation(); $("#userMenu").classList.toggle("open"); });
+document.addEventListener("click", () => $("#userMenu")?.classList.remove("open"));
+$("#logoutBtn")?.addEventListener("click", async () => {
+  try { await fetch("/api/auth/logout", { method: "POST" }); } catch { /* redirect regardless */ }
+  location.href = "/login.html";
+});
+
+// ---------- boot (gated on auth) ----------
+const GUIDE_DEEP_LINK = new URLSearchParams(location.search).get("guide");
+(async function boot() {
+  const user = await requireAuth();
+  if (!user) return; // redirected to /login.html
+  renderUser(user);
+  if (GUIDE_DEEP_LINK === "onboarding") {
+    show("guide");
+    const target = document.getElementById("g-onboarding");
+    if (target) target.scrollIntoView({ behavior: "instant", block: "start" });
+    document.querySelectorAll(".guide-toc .toc-link").forEach((b) => b.classList.toggle("active", b.dataset.scroll === "g-onboarding"));
+  } else if (!PROJECT) {
+    // No app selected -> the Applications catalog (only this user's orgs).
+    show("apps"); load("apps");
+  } else {
+    loadOverview();
+  }
+})();

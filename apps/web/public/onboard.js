@@ -8,6 +8,10 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 let project = null; // { orgId, projectId, projectName, publicKey, secretKey, ingestUrl }
 let pollTimer = null;
 
+// Adding an application requires an account — the new app lands under the
+// signed-in user's organization.
+fetch("/api/auth/me").then((r) => { if (!r.ok) location.href = "/login.html"; }).catch(() => { location.href = "/login.html"; });
+
 function showStep(n) {
   [1, 2, 3].forEach((i) => $(`#step${i}`).classList.toggle("on", i === n));
   document.querySelectorAll(".onb-step-dot").forEach((d) => {
@@ -26,10 +30,9 @@ function showError(msg) {
 
 // ---------- Step 1: create project ----------
 $("#createBtn").addEventListener("click", async () => {
-  const orgName = $("#orgName").value.trim();
   const projectName = $("#projName").value.trim();
   showError("");
-  if (!orgName || !projectName) { showError("Please fill in both fields."); return; }
+  if (!projectName) { showError("Please enter an application name."); return; }
 
   const btn = $("#createBtn");
   btn.disabled = true;
@@ -38,8 +41,9 @@ $("#createBtn").addEventListener("click", async () => {
     const res = await fetch("/api/onboarding/projects", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ orgName, projectName }),
+      body: JSON.stringify({ projectName }),
     });
+    if (res.status === 401) { location.href = "/login.html"; return; }
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
     project = data;

@@ -111,12 +111,94 @@ app.get("/api/projects", async (req, reply) => {
 
 app.get<{ Params: { id: string } }>("/api/project/:id", async (req, reply) => {
   const user = userOf(req)!;
-  if (!(await Auth.userCanAccessProject(user.id, req.params.id))) { reply.code(403).send({ error: "forbidden" }); return; }
+  const role = await Auth.userRoleForProject(user.id, req.params.id);
+  if (!role) { reply.code(403).send({ error: "forbidden" }); return; }
   try {
     const meta = await Onboarding.getProjectMeta(req.params.id);
     if (!meta) { reply.code(404).send({ error: "project not found" }); return; }
-    return meta;
+    return { ...meta, role };
   } catch (err) { app.log.error({ err }, "project meta failed"); reply.code(503).send({ error: String(err) }); }
+});
+
+// Gate an action on the caller's role in the project's org. Returns the org id
+// (and the caller's role) when allowed; sends the appropriate 4xx and returns
+// null otherwise.
+async function roleGate(
+  req: unknown,
+  reply: import("fastify").FastifyReply,
+  project: string | undefined,
+  min: string,
+): Promise<{ orgId: string; role: string } | null> {
+  const user = userOf(req)!;
+  if (!project) { reply.code(400).send({ error: "project required" }); return null; }
+  const role = await Auth.userRoleForProject(user.id, project);
+  if (!role) { reply.code(403).send({ error: "forbidden" }); return null; }
+  if (!Auth.atLeast(role, min)) { reply.code(403).send({ error: `requires ${min} role` }); return null; }
+  const orgId = await Auth.orgIdForProject(project);
+  if (!orgId) { reply.code(404).send({ error: "project not found" }); return null; }
+  return { orgId, role };
+}
+
+// ---------------- API keys (admin+) ----------------
+app.get("/api/keys", async (req, reply) => {
+  const project = (req.query as ScopedQuery).project;
+  if (!(await roleGate(req, reply, project, "admin"))) return;
+  try { return { keys: await Onboarding.listKeys(project!) }; }
+  catch (err) { app.log.error({ err }, "keys list failed"); reply.code(503).send({ error: String(err) }); }
+});
+
+app.post<{ Body: { project?: string } }>("/api/keys", async (req, reply) => {
+  const project = req.body?.project;
+  if (!(await roleGate(req, reply, project, "admin"))) return;
+  try { return await Onboarding.createKey(project!); }
+  catch (err) { app.log.error({ err }, "key create failed"); reply.code(500).send({ error: String(err) }); }
+});
+
+app.delete<{ Params: { id: string }; Querystring: ScopedQuery }>("/api/keys/:id", async (req, reply) => {
+  const project = req.query.project;
+  if (!(await roleGate(req, reply, project, "admin"))) return;
+  const r = await Onboarding.revokeKey(project!, req.params.id);
+  if ("error" in r) { reply.code(400).send(r); return; }
+  return r;
+});
+
+// ---------------- team members (view: member+, manage: admin+) ----------------
+app.get("/api/members", async (req, reply) => {
+  const project = (req.query as ScopedQuery).project;
+  const g = await roleGate(req, reply, project, "member");
+  if (!g) return;
+  const user = userOf(req)!;
+  try { return { members: await Auth.listMembers(g.orgId), myRole: g.role, myUserId: user.id }; }
+  catch (err) { app.log.error({ err }, "members list failed"); reply.code(503).send({ error: String(err) }); }
+});
+
+app.post<{ Body: { project?: string; email?: string; role?: string } }>("/api/members/invite", async (req, reply) => {
+  const g = await roleGate(req, reply, req.body?.project, "admin");
+  if (!g) return;
+  const user = userOf(req)!;
+  const r = await Auth.inviteMember(g.orgId, req.body?.email || "", req.body?.role || "member", user.id);
+  if ("error" in r) { reply.code(400).send(r); return; }
+  return r;
+});
+
+app.patch<{ Body: { project?: string; userId?: string; role?: string } }>("/api/members/role", async (req, reply) => {
+  const g = await roleGate(req, reply, req.body?.project, "admin");
+  if (!g) return;
+  const r = await Auth.updateMemberRole(g.orgId, req.body?.userId || "", req.body?.role || "");
+  if ("error" in r) { reply.code(400).send(r); return; }
+  return r;
+});
+
+app.post<{ Body: { project?: string; userId?: string; email?: string } }>("/api/members/remove", async (req, reply) => {
+  const g = await roleGate(req, reply, req.body?.project, "admin");
+  if (!g) return;
+  if (req.body?.userId) {
+    const r = await Auth.removeMember(g.orgId, req.body.userId);
+    if ("error" in r) { reply.code(400).send(r); return; }
+    return r;
+  }
+  if (req.body?.email) { await Auth.revokeInvite(g.orgId, req.body.email); return { ok: true }; }
+  reply.code(400).send({ error: "userId or email required" });
 });
 
 app.get<{ Params: { id: string }; Querystring: ScopedQuery }>("/api/trace/:id", async (req, reply) => {

@@ -103,6 +103,11 @@
       <button class="nav-item" type="button" data-nav="prompts"><span class="nav-ico">¶</span>Prompts</button>
       <button class="nav-item" type="button" data-nav="evals"><span class="nav-ico">✓</span>Evals</button>
     </div>
+    <div class="nav-group" id="manageGroup" style="display:none">
+      <div class="nav-label">Manage</div>
+      <button class="nav-item" type="button" data-nav="keys" id="navKeys"><span class="nav-ico">⚿</span>API Keys</button>
+      <button class="nav-item" type="button" data-nav="team"><span class="nav-ico">◍</span>Team</button>
+    </div>
     <div class="rail-foot">
       <a class="nav-item" href="/onboard.html" style="text-decoration:none;"><span class="nav-ico">+</span>Connect a new app</a>
       <button class="nav-item" type="button" data-nav="guide"><span class="nav-ico">ℹ</span>User Guide</button>
@@ -112,7 +117,10 @@
 
   <div class="main">
     <header class="topbar">
-      <button class="ctx" type="button" id="projectCtx" title="Scoped by your personalized onboarding link"><span class="k">Project</span> <span id="projectLabel">All projects</span></button>
+      <div class="menu" id="projMenu">
+        <button class="ctx" type="button" id="projectCtx" title="Switch application"><span class="k">Project</span> <span id="projectLabel">All applications</span> <span class="caret">▾</span></button>
+        <div class="menu-pop" id="projPop" style="min-width:220px;max-height:60vh;overflow:auto"></div>
+      </div>
       <button class="ctx" type="button"><span class="k">Env</span> production</button>
       <div class="menu" id="rangeMenu">
         <button class="ctx" type="button" id="rangeBtn"><span class="k">Range</span> <span id="rangeLabel">All time</span> <span class="caret">▾</span></button>
@@ -141,6 +149,34 @@
       <section class="view" id="view-apps">
         <div class="page-head"><h1 class="page-title">Applications</h1><span class="page-sub"><span class="live-dot"></span><span id="appsSub">loading…</span></span></div>
         <div id="appsCatalog" class="stack" style="gap:calc(var(--u)*5)"></div>
+      </section>
+
+      <!-- API KEYS -->
+      <section class="view" id="view-keys">
+        <div class="page-head"><h1 class="page-title">API Keys</h1><span class="page-sub"><span id="keysSub">loading…</span></span></div>
+        <div class="card">
+          <div class="card-head"><span class="card-title">Keys for this application</span><button class="btn btn-primary" id="createKeyBtn" type="button" style="padding:6px 12px;font-size:12px">Create key</button></div>
+          <div id="newKeyBox"></div>
+          <div class="tablewrap"><table id="keysTable"><tbody><tr><td class="loading">loading…</td></tr></tbody></table></div>
+        </div>
+      </section>
+
+      <!-- TEAM -->
+      <section class="view" id="view-team">
+        <div class="page-head"><h1 class="page-title">Team</h1><span class="page-sub"><span id="teamSub">loading…</span></span></div>
+        <div class="card" id="inviteCard" style="display:none">
+          <div class="card-head"><span class="card-title">Invite a teammate</span></div>
+          <div class="pad" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;padding:calc(var(--u)*3)">
+            <div class="field" style="flex:1;min-width:200px"><label for="inviteEmail" style="font-size:12px;font-weight:600">Email</label><input id="inviteEmail" type="email" placeholder="teammate@company.com" style="font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink)"></div>
+            <div class="field"><label for="inviteRole" style="font-size:12px;font-weight:600">Role</label><select id="inviteRole" style="font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink)"><option value="admin">Admin</option><option value="member" selected>Member</option><option value="viewer">Viewer</option></select></div>
+            <button class="btn btn-primary" id="inviteBtn" type="button" style="padding:8px 14px;font-size:12.5px">Send invite</button>
+          </div>
+          <div id="inviteResult" style="padding:0 calc(var(--u)*3) calc(var(--u)*2.5)"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><span class="card-title">Members</span></div>
+          <div class="tablewrap"><table id="teamTable"><tbody><tr><td class="loading">loading…</td></tr></tbody></table></div>
+        </div>
       </section>
 
       <!-- OVERVIEW -->

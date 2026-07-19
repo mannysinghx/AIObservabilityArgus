@@ -11,26 +11,49 @@ const PROJECT = new URLSearchParams(location.search).get("project") || "";
 // Header project chip: show the real application name (not a UUID). When scoped
 // to one app, resolve its name via /api/project/:id; unscoped, it reads
 // "All applications" and links to the catalog.
+let PROJECT_ROLE = null;
+const ROLE_RANK = { viewer: 0, member: 1, admin: 2, owner: 3 };
 document.addEventListener("DOMContentLoaded", async () => {
   const el = document.getElementById("projectLabel");
+  const projMenu = document.getElementById("projMenu");
   const ctx = document.getElementById("projectCtx");
-  if (ctx) {
-    ctx.title = PROJECT ? "Click to see all applications" : "All applications";
-    ctx.addEventListener("click", () => {
-      if (PROJECT) { location.href = location.pathname; } // drop scope -> catalog
-      else { show("apps"); load("apps"); }
-    });
-  }
+  if (ctx) ctx.addEventListener("click", (e) => { e.stopPropagation(); projMenu.classList.toggle("open"); buildSwitcher(); });
+  document.addEventListener("click", () => projMenu?.classList.remove("open"));
+
   if (!PROJECT) { if (el) el.textContent = "All applications"; return; }
   if (el) el.textContent = PROJECT.slice(0, 8) + "…";
   try {
     const m = await (await fetch("/api/project/" + encodeURIComponent(PROJECT))).json();
-    if (el && m && m.projectName) {
-      el.textContent = m.projectName;
-      el.title = (m.orgName ? m.orgName + " · " : "") + PROJECT;
+    if (m && m.projectName) {
+      if (el) { el.textContent = m.projectName; el.title = (m.orgName ? m.orgName + " · " : "") + PROJECT; }
+      PROJECT_ROLE = m.role || null;
+      applyRoleUI();
     }
   } catch { /* keep the truncated id fallback */ }
 });
+
+// Header switcher: jump between the user's applications without going to the catalog.
+let SWITCHER_BUILT = false;
+async function buildSwitcher() {
+  if (SWITCHER_BUILT) return;
+  SWITCHER_BUILT = true;
+  const pop = $("#projPop");
+  try {
+    const apps = await (await fetch("/api/projects")).json();
+    pop.innerHTML =
+      `<button data-goto="/">All applications</button>` +
+      (apps || []).map((a) => `<button data-goto="/?project=${encodeURIComponent(a.projectId)}"${a.projectId === PROJECT ? ' class="on"' : ""}>${esc(a.projectName)} <span class="dim" style="font-size:10px">${esc(a.orgName)}</span></button>`).join("");
+  } catch { pop.innerHTML = `<button data-goto="/">All applications</button>`; }
+  pop.querySelectorAll("[data-goto]").forEach((b) => b.addEventListener("click", () => { location.href = b.dataset.goto; }));
+}
+
+// Show/hide role-gated management nav. Team = member+, API Keys = admin+.
+function applyRoleUI() {
+  const r = ROLE_RANK[PROJECT_ROLE] ?? -1;
+  if (PROJECT && r >= 1) $("#manageGroup").style.display = "";
+  const nk = $("#navKeys");
+  if (nk) nk.style.display = PROJECT && r >= 2 ? "" : "none";
+}
 
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -78,7 +101,7 @@ function breakdown(sel, items, isSev) {
 }
 
 // ---------- routing ----------
-const VIEWS = ["apps", "overview", "threat", "incidents", "review", "redteam", "traces", "trace", "sessions", "analytics", "prompts", "evals", "appearance", "guide"];
+const VIEWS = ["apps", "overview", "threat", "incidents", "review", "redteam", "traces", "trace", "sessions", "analytics", "prompts", "evals", "keys", "team", "appearance", "guide"];
 function show(view) {
   VIEWS.forEach((v) => $(`#view-${v}`).classList.toggle("on", v === view));
   document.querySelectorAll(".nav-item[data-nav]").forEach((b) => b.classList.toggle("active", b.dataset.nav === view));
@@ -334,7 +357,7 @@ async function loadReview() {
   } catch (e) { banner("Review queue failed: " + e.message); }
 }
 async function postVerdict(eventId, verdict) {
-  try { await fetch("/api/verdict", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ eventId, verdict }) }); }
+  try { await fetch("/api/verdict", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ eventId, verdict, project: PROJECT }) }); }
   catch (e) { banner("Verdict failed: " + e.message); }
 }
 
@@ -498,8 +521,108 @@ $("#refreshBtn").addEventListener("click", () => load(document.querySelector(".n
 
 // ---------- loader dispatch ----------
 function load(view) {
-  ({ apps: loadApps, overview: loadOverview, threat: loadThreat, incidents: loadIncidents, review: loadReview, traces: loadTraces, sessions: loadSessions, analytics: loadAnalytics, evals: loadEvals }[view] || (() => {}))();
+  ({ apps: loadApps, overview: loadOverview, threat: loadThreat, incidents: loadIncidents, review: loadReview, traces: loadTraces, sessions: loadSessions, analytics: loadAnalytics, evals: loadEvals, keys: loadKeys, team: loadTeam }[view] || (() => {}))();
 }
+
+// ---------- API Keys (admin+) ----------
+async function loadKeys() {
+  if (!PROJECT) { banner("Open an application to manage its API keys."); return; }
+  try {
+    const d = await api("/api/keys"); banner("");
+    const keys = d.keys || [];
+    $("#keysSub").textContent = `${keys.length} key${keys.length !== 1 ? "s" : ""} for this application`;
+    const t = $("#keysTable");
+    t.innerHTML = `<thead><tr><th>Public key</th><th>Created</th><th>Last used</th><th></th></tr></thead><tbody>` +
+      keys.map((k) => `<tr><td class="mono">${esc(k.publicKey)}</td><td class="dim">${k.createdAt ? ago(k.createdAt) : "—"}</td><td class="dim">${k.lastUsedAt ? ago(k.lastUsedAt) : "never"}</td><td style="text-align:right"><button class="btn" data-revoke="${esc(k.id)}" style="padding:3px 9px;font-size:11px;color:var(--sev-critical)">Revoke</button></td></tr>`).join("") + "</tbody>";
+    t.querySelectorAll("[data-revoke]").forEach((b) => b.addEventListener("click", () => revokeKey(b.dataset.revoke)));
+    stamp();
+  } catch (e) { banner("Keys query failed: " + e.message); }
+}
+$("#createKeyBtn")?.addEventListener("click", async () => {
+  try {
+    const res = await fetch("/api/keys", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ project: PROJECT }) });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { banner(d.error || "Create failed"); return; }
+    $("#newKeyBox").innerHTML = `<div style="margin:calc(var(--u)*2) calc(var(--u)*3);padding:12px 14px;border:1px solid var(--accent);border-radius:var(--radius);background:color-mix(in srgb,var(--accent) 8%,transparent)">
+      <div style="font-weight:600;margin-bottom:6px">New key created — copy the secret now, it won't be shown again</div>
+      <div class="mono" style="font-size:12px;line-height:1.7">public: ${esc(d.publicKey)}<br>secret: ${esc(d.secretKey)}</div></div>`;
+    loadKeys();
+  } catch (e) { banner("Create failed: " + e.message); }
+});
+async function revokeKey(id) {
+  if (!confirm("Revoke this key? Any app using it will stop sending data.")) return;
+  try {
+    const res = await fetch(`/api/keys/${encodeURIComponent(id)}?project=${encodeURIComponent(PROJECT)}`, { method: "DELETE" });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { banner(d.error || "Revoke failed"); return; }
+    $("#newKeyBox").innerHTML = ""; loadKeys();
+  } catch (e) { banner("Revoke failed: " + e.message); }
+}
+
+// ---------- Team & roles ----------
+async function loadTeam() {
+  if (!PROJECT) { banner("Open an application to manage its team."); return; }
+  try {
+    const d = await api("/api/members"); banner("");
+    const members = d.members || [], myRole = d.myRole, myId = d.myUserId;
+    const canManage = myRole === "admin" || myRole === "owner";
+    $("#inviteCard").style.display = canManage ? "" : "none";
+    $("#teamSub").textContent = `${members.length} member${members.length !== 1 ? "s" : ""}`;
+    const t = $("#teamTable");
+    t.innerHTML = `<thead><tr><th>Member</th><th>Role</th><th></th></tr></thead><tbody>` +
+      members.map((m) => memberRow(m, canManage, myId)).join("") + "</tbody>";
+    wireTeam();
+    stamp();
+  } catch (e) { banner("Team query failed: " + e.message); }
+}
+function memberRow(m, canManage, myId) {
+  const you = m.userId && m.userId === myId;
+  const who = m.pending
+    ? `<span class="dim">${esc(m.email)}</span> <span class="pill pill-neutral">invited</span>`
+    : `${esc(m.name || m.email)}${m.name ? ` <span class="dim">${esc(m.email)}</span>` : ""}${you ? ' <span class="dim">(you)</span>' : ""}`;
+  let role;
+  if (canManage && !m.pending && !you) {
+    role = `<select data-role-user="${esc(m.userId)}" style="font:inherit;font-size:12px;padding:3px 6px;border:1px solid var(--line);border-radius:5px;background:var(--surface);color:var(--ink)">` +
+      ["owner", "admin", "member", "viewer"].map((r) => `<option value="${r}"${m.role === r ? " selected" : ""}>${r}</option>`).join("") + "</select>";
+  } else { role = `<span class="pill pill-neutral">${esc(m.role)}</span>`; }
+  const action = canManage && (m.pending || !you)
+    ? `<button class="btn" data-remove-user="${esc(m.userId || "")}" data-remove-email="${esc(m.pending ? m.email : "")}" style="padding:3px 9px;font-size:11px;color:var(--sev-critical)">Remove</button>`
+    : "";
+  return `<tr><td>${who}</td><td>${role}</td><td style="text-align:right">${action}</td></tr>`;
+}
+function wireTeam() {
+  document.querySelectorAll("[data-role-user]").forEach((s) => s.addEventListener("change", async () => {
+    try {
+      const res = await fetch("/api/members/role", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ project: PROJECT, userId: s.dataset.roleUser, role: s.value }) });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) banner(d.error || "Role change failed");
+    } catch (e) { banner(e.message); }
+    loadTeam();
+  }));
+  document.querySelectorAll("[data-remove-user]").forEach((b) => b.addEventListener("click", async () => {
+    if (!confirm("Remove this member from the organization?")) return;
+    try {
+      const res = await fetch("/api/members/remove", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ project: PROJECT, userId: b.dataset.removeUser || undefined, email: b.dataset.removeEmail || undefined }) });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) banner(d.error || "Remove failed");
+    } catch (e) { banner(e.message); }
+    loadTeam();
+  }));
+}
+$("#inviteBtn")?.addEventListener("click", async () => {
+  const email = $("#inviteEmail").value.trim(), role = $("#inviteRole").value;
+  const out = $("#inviteResult");
+  if (!email) { out.innerHTML = ""; return; }
+  try {
+    const res = await fetch("/api/members/invite", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ project: PROJECT, email, role }) });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { out.innerHTML = `<span style="color:var(--sev-critical);font-size:12px">${esc(d.error || "Invite failed")}</span>`; return; }
+    if (d.added) out.innerHTML = `<span style="color:var(--ok);font-size:12px">Added — they already had an Argus account.</span>`;
+    else out.innerHTML = `<span style="font-size:12px">Invitation created. Tell them to sign up at <b>${esc(location.origin)}/login.html</b> with <b>${esc(email)}</b> — they'll join this organization automatically.</span>`;
+    $("#inviteEmail").value = "";
+    loadTeam();
+  } catch (e) { out.innerHTML = `<span style="color:var(--sev-critical);font-size:12px">${esc(e.message)}</span>`; }
+});
 
 // ---------- auth gate + user menu ----------
 async function requireAuth() {

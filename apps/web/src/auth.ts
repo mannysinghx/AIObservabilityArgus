@@ -103,6 +103,8 @@ export async function signup(
       ]);
     }
 
+    await activateInvites(client, userId, email); // join any orgs they were invited to
+
     const token = await createSession(client, userId);
     await client.query("COMMIT");
     return { token, user: { id: userId, email, name: String(name || "").trim() } };
@@ -127,6 +129,7 @@ export async function login(
   if (!u || !verifyPassword(password, u.password_hash)) {
     return { error: "Incorrect email or password." };
   }
+  await activateInvites(pool, u.id, u.email); // pick up invites created since last login
   const token = await createSession(pool, u.id);
   return { token, user: { id: u.id, email: u.email, name: u.name } };
 }
@@ -179,6 +182,148 @@ export async function userCanAccessProject(userId: string, projectId: string): P
   );
   return (r.rowCount ?? 0) > 0;
 }
+
+// ---------------- roles ----------------
+
+export const ROLE_RANK: Record<string, number> = { viewer: 0, member: 1, admin: 2, owner: 3 };
+export const ASSIGNABLE_ROLES = ["admin", "member", "viewer"]; // owner is implicit (creator)
+
+/** The user's role in the org that owns `projectId`, or null if not a member. */
+export async function userRoleForProject(userId: string, projectId: string): Promise<string | null> {
+  const safe = String(projectId || "").replace(/[^a-zA-Z0-9-]/g, "");
+  if (!safe) return null;
+  const r = await pool.query<{ role: string }>(
+    `SELECT m.role FROM projects p JOIN memberships m ON m.org_id = p.org_id
+     WHERE p.id = $1 AND m.user_id = $2 LIMIT 1`,
+    [safe, userId],
+  );
+  return r.rows[0]?.role ?? null;
+}
+
+export async function orgIdForProject(projectId: string): Promise<string | null> {
+  const safe = String(projectId || "").replace(/[^a-zA-Z0-9-]/g, "");
+  if (!safe) return null;
+  const r = await pool.query<{ org_id: string }>("SELECT org_id FROM projects WHERE id = $1", [safe]);
+  return r.rows[0]?.org_id ?? null;
+}
+
+export async function userRoleForOrg(userId: string, orgId: string): Promise<string | null> {
+  const r = await pool.query<{ role: string }>(
+    "SELECT role FROM memberships WHERE user_id = $1 AND org_id = $2",
+    [userId, orgId],
+  );
+  return r.rows[0]?.role ?? null;
+}
+
+function atLeast(role: string | null, min: string): boolean {
+  return role != null && (ROLE_RANK[role] ?? -1) >= (ROLE_RANK[min] ?? 99);
+}
+
+// ---------------- team / invitations ----------------
+
+export interface Member {
+  userId: string | null;
+  email: string;
+  name: string;
+  role: string;
+  pending: boolean;
+  inviteToken?: string;
+}
+
+/** Members of an org plus any pending invitations. */
+export async function listMembers(orgId: string): Promise<Member[]> {
+  const active = await pool.query<{ user_id: string; email: string; name: string; role: string }>(
+    `SELECT u.id AS user_id, u.email, u.name, m.role
+     FROM memberships m JOIN users u ON u.id = m.user_id
+     WHERE m.org_id = $1 ORDER BY (m.role='owner') DESC, u.email`,
+    [orgId],
+  );
+  const pending = await pool.query<{ email: string; role: string; token: string }>(
+    "SELECT email, role, token FROM invitations WHERE org_id = $1 AND accepted_at IS NULL ORDER BY email",
+    [orgId],
+  );
+  return [
+    ...active.rows.map((r) => ({ userId: r.user_id, email: r.email, name: r.name, role: r.role, pending: false })),
+    ...pending.rows.map((r) => ({ userId: null, email: r.email, name: "", role: r.role, pending: true, inviteToken: r.token })),
+  ];
+}
+
+/**
+ * Invite an email to an org with a role. If the email already has an account,
+ * they're added immediately; otherwise a pending invitation is recorded and
+ * activated when they sign up / sign in. Returns { added } or { invited, token }.
+ */
+export async function inviteMember(
+  orgId: string,
+  emailRaw: string,
+  role: string,
+  invitedBy: string,
+): Promise<{ added?: boolean; invited?: boolean; token?: string } | AuthError> {
+  const email = String(emailRaw || "").trim().toLowerCase();
+  if (!validEmail(email)) return { error: "Enter a valid email address." };
+  if (!ASSIGNABLE_ROLES.includes(role)) return { error: "Invalid role." };
+
+  const existing = await pool.query<{ id: string }>("SELECT id FROM users WHERE email = $1", [email]);
+  if (existing.rowCount) {
+    const uid = existing.rows[0].id;
+    const already = await pool.query("SELECT 1 FROM memberships WHERE user_id = $1 AND org_id = $2", [uid, orgId]);
+    if (already.rowCount) return { error: "That person is already a member." };
+    await pool.query("INSERT INTO memberships (user_id, org_id, role) VALUES ($1, $2, $3)", [uid, orgId, role]);
+    return { added: true };
+  }
+  const token = randomBytes(18).toString("base64url");
+  await pool.query(
+    `INSERT INTO invitations (org_id, email, role, token, invited_by) VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (org_id, email) DO UPDATE SET role = EXCLUDED.role, token = EXCLUDED.token, accepted_at = NULL`,
+    [orgId, email, role, token, invitedBy],
+  );
+  return { invited: true, token };
+}
+
+/** Change a member's role. Refuses to demote the last owner. */
+export async function updateMemberRole(orgId: string, targetUserId: string, role: string): Promise<AuthError | { ok: true }> {
+  if (!ASSIGNABLE_ROLES.includes(role) && role !== "owner") return { error: "Invalid role." };
+  const cur = await pool.query<{ role: string }>("SELECT role FROM memberships WHERE org_id = $1 AND user_id = $2", [orgId, targetUserId]);
+  if (!cur.rowCount) return { error: "Not a member." };
+  if (cur.rows[0].role === "owner" && role !== "owner") {
+    const owners = await pool.query("SELECT count(*)::int AS n FROM memberships WHERE org_id = $1 AND role = 'owner'", [orgId]);
+    if ((owners.rows[0] as { n: number }).n <= 1) return { error: "Can't change the last owner's role." };
+  }
+  await pool.query("UPDATE memberships SET role = $3 WHERE org_id = $1 AND user_id = $2", [orgId, targetUserId, role]);
+  return { ok: true };
+}
+
+/** Remove a member (or revoke a pending invite by email). Refuses the last owner. */
+export async function removeMember(orgId: string, targetUserId: string): Promise<AuthError | { ok: true }> {
+  const cur = await pool.query<{ role: string }>("SELECT role FROM memberships WHERE org_id = $1 AND user_id = $2", [orgId, targetUserId]);
+  if (cur.rowCount && cur.rows[0].role === "owner") {
+    const owners = await pool.query("SELECT count(*)::int AS n FROM memberships WHERE org_id = $1 AND role = 'owner'", [orgId]);
+    if ((owners.rows[0] as { n: number }).n <= 1) return { error: "Can't remove the last owner." };
+  }
+  await pool.query("DELETE FROM memberships WHERE org_id = $1 AND user_id = $2", [orgId, targetUserId]);
+  return { ok: true };
+}
+
+export async function revokeInvite(orgId: string, email: string): Promise<void> {
+  await pool.query("DELETE FROM invitations WHERE org_id = $1 AND lower(email) = lower($2) AND accepted_at IS NULL", [orgId, email]);
+}
+
+/** Turn any pending invitations for this email into memberships. */
+async function activateInvites(
+  exec: { query: (q: string, p: unknown[]) => Promise<unknown> },
+  userId: string,
+  email: string,
+): Promise<void> {
+  await exec.query(
+    `INSERT INTO memberships (user_id, org_id, role)
+     SELECT $1, org_id, role FROM invitations WHERE lower(email) = lower($2) AND accepted_at IS NULL
+     ON CONFLICT (user_id, org_id) DO NOTHING`,
+    [userId, email],
+  );
+  await exec.query("UPDATE invitations SET accepted_at = now() WHERE lower(email) = lower($1) AND accepted_at IS NULL", [email]);
+}
+
+export { atLeast };
 
 /** Parse the session token out of a Cookie header. */
 export function parseSessionCookie(cookieHeader: string | undefined): string | undefined {

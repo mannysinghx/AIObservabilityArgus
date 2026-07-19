@@ -184,6 +184,53 @@ export async function listProjectsWithStats(orgIds: string[]): Promise<ProjectSt
   });
 }
 
+// ---------------- API key management ----------------
+
+export interface ApiKeyRow {
+  id: string;
+  publicKey: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
+
+/** List a project's API keys — never the secret (only its hash is stored). */
+export async function listKeys(projectId: string): Promise<ApiKeyRow[]> {
+  const safe = String(projectId || "").replace(/[^a-zA-Z0-9-]/g, "");
+  const { rows } = await pool.query<{ id: string; public_key: string; created_at: Date; last_used_at: Date | null }>(
+    `SELECT id, public_key, created_at, last_used_at FROM api_keys WHERE project_id = $1 ORDER BY created_at DESC`,
+    [safe],
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    publicKey: r.public_key,
+    createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
+    lastUsedAt: r.last_used_at ? (r.last_used_at instanceof Date ? r.last_used_at.toISOString() : String(r.last_used_at)) : null,
+  }));
+}
+
+/** Mint a new API key pair for a project. The secret is returned ONCE. */
+export async function createKey(projectId: string): Promise<{ id: string; publicKey: string; secretKey: string }> {
+  const safe = String(projectId || "").replace(/[^a-zA-Z0-9-]/g, "");
+  const publicKey = genKey("pk");
+  const secretKey = genKey("sk");
+  const { rows } = await pool.query<{ id: string }>(
+    `INSERT INTO api_keys (project_id, public_key, secret_hash, scopes) VALUES ($1, $2, $3, $4) RETURNING id`,
+    [safe, publicKey, sha256(secretKey), ["ingest"]],
+  );
+  return { id: rows[0].id, publicKey, secretKey };
+}
+
+/** Revoke a key. Refuses to remove the last key so a project can't be orphaned. */
+export async function revokeKey(projectId: string, keyId: string): Promise<{ ok: true } | { error: string }> {
+  const safeP = String(projectId || "").replace(/[^a-zA-Z0-9-]/g, "");
+  const safeK = String(keyId || "").replace(/[^a-zA-Z0-9-]/g, "");
+  const count = await pool.query("SELECT count(*)::int AS n FROM api_keys WHERE project_id = $1", [safeP]);
+  if ((count.rows[0] as { n: number }).n <= 1) return { error: "Can't revoke the last key — create a new one first." };
+  const res = await pool.query("DELETE FROM api_keys WHERE id = $1 AND project_id = $2", [safeK, safeP]);
+  if (!res.rowCount) return { error: "Key not found." };
+  return { ok: true };
+}
+
 export interface ProjectMeta {
   projectId: string;
   projectName: string;

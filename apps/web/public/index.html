@@ -160,6 +160,12 @@
       <!-- APPLICATIONS (multi-tenant catalog: customers -> their apps) -->
       <section class="view" id="view-apps">
         <div class="page-head"><h1 class="page-title">Applications</h1><span class="page-sub"><span class="live-dot"></span><span id="appsSub">loading…</span></span></div>
+        <!-- Platform operators only. Off by default: this is the landing view, so
+             it must open on your own company, not on every customer's apps. -->
+        <label id="allCompaniesToggle" style="display:none;align-items:center;gap:7px;font-size:12px;margin-bottom:calc(var(--u)*3)">
+          <input type="checkbox" id="allCompaniesChk">
+          <span class="dim">Show every company (platform operator view)</span>
+        </label>
         <div id="appsCatalog" class="stack" style="gap:calc(var(--u)*5)"></div>
       </section>
 

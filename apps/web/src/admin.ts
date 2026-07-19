@@ -149,7 +149,9 @@ export async function deleteOrg(orgId: string): Promise<{ ok: true; projectsPurg
   const projectIds = rows.map((r) => r.id.replace(/[^a-zA-Z0-9-]/g, ""));
   if (projectIds.length) {
     const list = projectIds.map((id) => `'${id}'`).join(",");
-    for (const tbl of ["traces", "observations", "security_events"]) {
+    // `scores` is tenant data too — it was omitted here, so a deleted customer's
+    // eval/annotation rows survived the purge.
+    for (const tbl of ["traces", "observations", "security_events", "scores"]) {
       await ch().command({ query: `DELETE FROM ${tbl} WHERE project_id IN (${list})` });
     }
   }

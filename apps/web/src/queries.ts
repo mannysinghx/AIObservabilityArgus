@@ -1,4 +1,5 @@
 import { ch } from "@argus/shared";
+import { safeProjectId } from "./ids.js";
 
 /**
  * Read-side ClickHouse queries for the dashboard (database `argus`). Tables are
@@ -17,14 +18,20 @@ function since(range: string | undefined, col: string): string {
   return iv ? `AND ${col} >= now() - INTERVAL ${iv}` : "";
 }
 
-// Project scoping. When a client self-onboards, their personalized dashboard
-// link carries ?project=<uuid> — every query below narrows to just that
-// project so one client never sees another's traces or security events.
-// Omitted entirely => the unscoped "all projects" view (today's default).
+// Project scoping. Every dashboard link carries ?project=<uuid> and every query
+// below narrows to just that project, so one customer never sees another's
+// traces or security events.
+//
+// FAIL CLOSED: a missing or unusable project id yields `AND 1 = 0` (no rows),
+// never an empty string. An empty string would widen the query to every tenant
+// in the table — so a caller that simply forgot to thread the project through
+// would silently return the whole platform's data instead of erroring. That is
+// exactly how the Prompts/Evals view leaked cross-tenant eval scores. An empty
+// panel is a bug report; a populated one full of someone else's data is a
+// breach.
 function scoped(projectId: string | undefined, col = "project_id"): string {
-  if (!projectId) return "";
-  const safe = projectId.replace(/[^a-zA-Z0-9_-]/g, "");
-  return safe ? `AND ${col} = '${safe}'` : "";
+  const safe = safeProjectId(projectId);
+  return safe ? `AND ${col} = '${safe}'` : "AND 1 = 0";
 }
 
 // ---------------- Overview ----------------
@@ -274,26 +281,35 @@ export async function analytics(range?: string, projectId?: string) {
 }
 
 // ---------------- Prompts / Evals (may be empty) ----------------
-export async function prompts() {
-  // Prompt versions live in Postgres; scores (evals) in ClickHouse.
+export async function prompts(projectId?: string) {
+  // Prompt versions live in Postgres; scores (evals) in ClickHouse. `scores`
+  // carries project_id like every other table — this query used to omit it and
+  // returned every tenant's eval names and score distributions to any signed-in
+  // user who could reach the view.
   const evalScores = await q(`
     SELECT name, count() AS n, round(avg(value),3) AS avg_value,
            round(min(value),3) AS min_value, round(max(value),3) AS max_value
-    FROM scores FINAL WHERE source IN ('eval','annotation') GROUP BY name ORDER BY n DESC LIMIT 50`).catch(() => []);
+    FROM scores FINAL WHERE source IN ('eval','annotation') ${scoped(projectId)}
+    GROUP BY name ORDER BY n DESC LIMIT 50`).catch(() => []);
   return { evalScores };
 }
 
 // ---------------- Verdict write ----------------
-export async function setVerdict(eventId: string, verdict: string): Promise<boolean> {
+export async function setVerdict(eventId: string, verdict: string, projectId?: string): Promise<boolean> {
   const allowed = ["unreviewed", "confirmed", "false_positive"];
   if (!allowed.includes(verdict)) throw new Error("invalid verdict");
   const safe = eventId.replace(/[^a-zA-Z0-9_-]/g, "");
+  // Scoped by project, not just event_id. The caller's access is checked against
+  // the project they *claim*, so looking the event up by id alone let a member of
+  // any project set verdicts on another tenant's security events (event ids are
+  // discoverable/guessable and the write re-inserts the row). The scope makes the
+  // claimed project and the mutated row the same tenant, or nothing matches.
   const rows = await q<Record<string, unknown>>(`
     SELECT project_id, event_id, trace_id, observation_id,
            toString(detected_at) AS detected_at, category, severity, outcome, score,
            l1_rules, l2_scores, l3_verdict, l4_signals, evidence_excerpt,
            content_sha256, incident_id
-    FROM security_events FINAL WHERE event_id='${safe}' LIMIT 1`);
+    FROM security_events FINAL WHERE event_id='${safe}' ${scoped(projectId)} LIMIT 1`);
   if (!rows.length) return false;
   const r = rows[0];
   // Re-insert with the new verdict and a fresh event_ts; ReplacingMergeTree +

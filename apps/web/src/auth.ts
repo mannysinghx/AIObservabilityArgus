@@ -1,5 +1,6 @@
 import { scryptSync, randomBytes, timingSafeEqual } from "node:crypto";
 import { pool, sha256 } from "./db.js";
+import { safeProjectId } from "./ids.js";
 import * as Email from "./email.js";
 
 function baseUrl(): string {
@@ -54,10 +55,15 @@ function validEmail(e: string): boolean {
 }
 
 /**
- * Create an account. The FIRST user to sign up bootstraps the platform: they
- * become owner of every organization that already exists (the projects created
- * before accounts existed). Everyone after gets a fresh org from their company
- * name. Returns the new session token, or an error.
+ * Create an account. The first user to sign up becomes the platform operator
+ * (super-admin). Every account — including the first — gets an org of its own
+ * from the company name, and membership of nothing else.
+ *
+ * The first account used to also be granted `owner` membership of every
+ * organization that already existed. That silently made one customer a member
+ * of other customers' companies, which is indistinguishable from a breach when
+ * read out of the memberships table. Platform-operator reach now comes only
+ * from the explicit is_platform_admin flag, which is visible and revocable.
  */
 export async function signup(
   emailRaw: string,
@@ -94,13 +100,6 @@ export async function signup(
     );
     const userId = ins.rows[0].id;
 
-    if (isFirst) {
-      // Bootstrap: claim every pre-existing organization as owner.
-      await client.query(
-        "INSERT INTO memberships (user_id, org_id, role) SELECT $1, id, 'owner' FROM organizations ON CONFLICT DO NOTHING",
-        [userId],
-      );
-    }
     const company = String(companyName || "").trim().slice(0, 200);
     if (company) {
       const org = await client.query<{ id: string }>(
@@ -286,7 +285,7 @@ export async function allOrgIds(): Promise<string[]> {
 
 /** Is `projectId` inside one of the user's organizations? */
 export async function userCanAccessProject(userId: string, projectId: string): Promise<boolean> {
-  const safe = String(projectId || "").replace(/[^a-zA-Z0-9-]/g, "");
+  const safe = safeProjectId(projectId); // must match the query-side sanitizer exactly
   if (!safe) return false;
   const r = await pool.query(
     `SELECT 1 FROM projects p JOIN memberships m ON m.org_id = p.org_id
@@ -303,7 +302,7 @@ export const ASSIGNABLE_ROLES = ["admin", "member", "viewer"]; // owner is impli
 
 /** The user's role in the org that owns `projectId`, or null if not a member. */
 export async function userRoleForProject(userId: string, projectId: string): Promise<string | null> {
-  const safe = String(projectId || "").replace(/[^a-zA-Z0-9-]/g, "");
+  const safe = safeProjectId(projectId); // must match the query-side sanitizer exactly
   if (!safe) return null;
   const r = await pool.query<{ role: string }>(
     `SELECT m.role FROM projects p JOIN memberships m ON m.org_id = p.org_id
@@ -314,7 +313,7 @@ export async function userRoleForProject(userId: string, projectId: string): Pro
 }
 
 export async function orgIdForProject(projectId: string): Promise<string | null> {
-  const safe = String(projectId || "").replace(/[^a-zA-Z0-9-]/g, "");
+  const safe = safeProjectId(projectId); // must match the query-side sanitizer exactly
   if (!safe) return null;
   const r = await pool.query<{ org_id: string }>("SELECT org_id FROM projects WHERE id = $1", [safe]);
   return r.rows[0]?.org_id ?? null;

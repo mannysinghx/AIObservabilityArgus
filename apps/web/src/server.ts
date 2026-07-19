@@ -143,13 +143,21 @@ guard("review", (r, p) => Q.reviewQueue(r, p));
 guard("sessions", (r, p) => Q.sessions(r, p));
 guard("traces", (r, p) => Q.tracesList(r, 100, p));
 guard("analytics", (r, p) => Q.analytics(r, p));
-guard("prompts", () => Q.prompts());
+guard("prompts", (_r, p) => Q.prompts(p));
 
-// Catalog: only the customers (orgs) this user belongs to, and their apps.
+// Catalog: by default, ONLY the companies this user belongs to — for everyone,
+// platform admins included. This is the landing view, so defaulting a platform
+// admin to every customer's applications made the product open on what looks
+// like an operator console instead of their own company.
+//
+// Cross-tenant listing is still available to platform admins, but only when
+// asked for explicitly (?all=1) from the admin area — never implicitly.
 app.get("/api/projects", async (req, reply) => {
   const user = userOf(req)!;
+  const wantsAll = (req.query as { all?: string } | undefined)?.all === "1";
+  const crossTenant = wantsAll && user.isPlatformAdmin;
   try {
-    const orgIds = user.isPlatformAdmin ? await Auth.allOrgIds() : await Auth.userOrgIds(user.id);
+    const orgIds = crossTenant ? await Auth.allOrgIds() : await Auth.userOrgIds(user.id);
     return await Onboarding.listProjectsWithStats(orgIds);
   } catch (err) { app.log.error({ err }, "projects failed"); reply.code(503).send({ error: "query failed", detail: String(err) }); }
 });
@@ -274,7 +282,9 @@ app.post<{ Body: { eventId?: string; verdict?: string; project?: string } }>("/a
   if (!eventId || !verdict) { reply.code(400).send({ error: "eventId and verdict required" }); return; }
   if (!project || (!user.isPlatformAdmin && !(await Auth.userCanAccessProject(user.id, project)))) { reply.code(403).send({ error: "forbidden" }); return; }
   try {
-    const ok = await Q.setVerdict(eventId, verdict);
+    // Pass the project so the write is scoped to the tenant whose access we just
+    // verified — otherwise the id lookup crosses tenants.
+    const ok = await Q.setVerdict(eventId, verdict, project);
     if (!ok) { reply.code(404).send({ error: "event not found" }); return; }
     audit(req, "event.verdict_set", { orgId: (await Auth.orgIdForProject(project!)) || undefined, targetType: "event", target: eventId, metadata: { verdict, project } });
     return { ok: true, eventId, verdict };

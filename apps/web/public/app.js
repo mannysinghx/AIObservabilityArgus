@@ -117,9 +117,12 @@ document.querySelectorAll("[data-nav]").forEach((el) => el.addEventListener("cli
 }));
 
 // ---------- Applications catalog (customers -> their apps) ----------
+// Cross-company listing is opt-in and platform-admin only — the server enforces
+// both, this just drives the request.
+let SHOW_ALL_COMPANIES = false;
 async function loadApps() {
   try {
-    const rows = await (await fetch("/api/projects")).json(); banner("");
+    const rows = await (await fetch("/api/projects" + (SHOW_ALL_COMPANIES ? "?all=1" : ""))).json(); banner("");
     if (!Array.isArray(rows) || !rows.length) {
       $("#appsSub").textContent = "no applications yet";
       $("#appsCatalog").innerHTML = '<div class="card"><div class="empty" style="padding:calc(var(--u)*4)"><div class="big">No applications connected yet</div><a href="/onboard.html" style="color:var(--accent)">Connect your first app →</a></div></div>';
@@ -127,7 +130,9 @@ async function loadApps() {
     }
     const byOrg = new Map();
     rows.forEach((r) => { if (!byOrg.has(r.orgName)) byOrg.set(r.orgName, []); byOrg.get(r.orgName).push(r); });
-    $("#appsSub").textContent = `${rows.length} application${rows.length > 1 ? "s" : ""} across ${byOrg.size} customer${byOrg.size > 1 ? "s" : ""}`;
+    const noun = SHOW_ALL_COMPANIES ? "customers" : "companies";
+    const scopeNote = byOrg.size > 1 ? ` across ${byOrg.size} ${noun}` : "";
+    $("#appsSub").textContent = `${rows.length} application${rows.length > 1 ? "s" : ""}${scopeNote}`;
     $("#appsCatalog").innerHTML = [...byOrg.entries()].map(([org, apps]) => `
       <div>
         <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px">
@@ -781,8 +786,17 @@ function renderUser(u) {
   const btn = $("#userBtn"); if (btn) { btn.textContent = initial; btn.title = u.email; }
   const em = $("#userEmail"); if (em) em.textContent = u.email;
   if (u.emailVerified === false) showVerifyBanner();
-  if (u.isPlatformAdmin) { const g = $("#adminGroup"); if (g) g.style.display = ""; }
+  if (u.isPlatformAdmin) {
+    const g = $("#adminGroup"); if (g) g.style.display = "";
+    // Operators can still reach every company's apps — but only by asking.
+    const t = $("#allCompaniesToggle"); if (t) t.style.display = "flex";
+  }
 }
+$("#allCompaniesChk")?.addEventListener("change", (e) => {
+  SHOW_ALL_COMPANIES = e.target.checked;
+  SWITCHER_BUILT = false; // rebuild the header switcher against the new scope
+  loadApps();
+});
 function showVerifyBanner() {
   const bar = $("#verifyBanner"), msg = $("#verifyMsg");
   if (!bar) return;

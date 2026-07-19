@@ -72,8 +72,11 @@ const ago = (iso) => {
 };
 const sevName = (v) => (typeof v === "number" ? SEV_NAME[v] : v) || "info";
 const sevMax = (a, b) => (SEV_ORDER[sevName(a)] >= SEV_ORDER[sevName(b)] ? sevName(a) : sevName(b));
-const pill = (sev) => { const s = sevName(sev); return `<span class="pill pill-${s === "info" ? "neutral" : s}">${s}</span>`; };
-const outcomePill = (o) => `<span class="pill pill-${o === "succeeded" ? "critical" : o === "attempted" ? "ok" : o === "blocked" ? "medium" : "neutral"}">${esc(o)}</span>`;
+// Severity/outcome/verdict pills all carry their plain-English meaning on hover
+// (copy lives in glossary.js).
+const pill = (sev) => { const s = sevName(sev); return `<span class="pill pill-${s === "info" ? "neutral" : s}"${tipAttr(SEVERITY_INFO[s])}>${s}</span>`; };
+const outcomePill = (o) => `<span class="pill pill-${o === "succeeded" ? "critical" : o === "attempted" ? "ok" : o === "blocked" ? "medium" : "neutral"}"${tipAttr(OUTCOME_INFO[o])}>${esc(o)}</span>`;
+const verdictTag = (v) => `<span class="verdict-tag verdict-${esc(v)}"${tipAttr(VERDICT_INFO[v])}>${esc(titleCase(v))}</span>`;
 const dur = (ms) => (ms >= 1000 ? (ms / 1000).toFixed(2) + " s" : Math.round(ms) + " ms");
 
 async function api(path) {
@@ -89,15 +92,37 @@ async function api(path) {
 function banner(msg) { const b = $("#statusBanner"); if (!msg) { b.style.display = "none"; return; } b.style.display = "block"; b.textContent = msg; }
 function stamp() { $("#lastUpdated").textContent = "updated " + new Date().toLocaleTimeString(); }
 function tile(lab, val, sub, crit) {
-  return `<div class="card kpi ${crit ? "crit" : ""}"><span class="lab">${lab}</span><span class="val">${val}</span><span class="sub">${sub || ""}</span></div>`;
+  // Tooltip is looked up by the label itself, so every caller gets the
+  // explanation for free without threading an extra argument through.
+  return `<div class="card kpi ${crit ? "crit" : ""}"><span class="lab"${tipAttr(METRIC_INFO[lab])}>${lab}</span><span class="val">${val}</span><span class="sub">${sub || ""}</span></div>`;
 }
+/**
+ * An empty state that tells you how to get data, instead of only telling you
+ * there isn't any. `steps` entries may contain safe inline markup (<b>/<code>) —
+ * they're author-written copy, never user input.
+ */
+function emptyCta({ title, body, steps = [], action }) {
+  return `<div class="empty-cta">
+    <div class="big">${title}</div>
+    ${body ? `<p>${body}</p>` : ""}
+    ${steps.length ? `<div class="empty-steps">${steps.map((s, i) =>
+      `<div class="es-row"><span class="es-n">${i + 1}</span><span>${s}</span></div>`).join("")}</div>` : ""}
+    ${action ? `<a class="btn btn-primary" href="${esc(action.href)}" style="text-decoration:none">${esc(action.label)}</a>` : ""}
+  </div>`;
+}
+
 function breakdown(sel, items, isSev) {
   const el = $(sel); if (!el) return;
   if (!items || !items.length) { el.innerHTML = '<div class="empty" style="padding:calc(var(--u)*3)">none</div>'; return; }
   const max = Math.max(...items.map((i) => Number(i.n)), 1);
   el.innerHTML = items.map((i) => {
     const color = isSev ? `var(--sev-${sevName(i.label) === "info" ? "low" : sevName(i.label)})` : "var(--accent)";
-    return `<div class="row"><span>${isSev ? pill(i.label) : esc(titleCase(i.label) || "—")}</span><span class="barmini"><b style="width:${(Number(i.n) / max) * 100}%;background:${color}"></b></span><span class="mono dim">${num(i.n)}</span></div>`;
+    // Non-severity rows get the friendly label plus a hover explanation when we
+    // have one (categories, outcomes, span types...).
+    const lab = isSev
+      ? pill(i.label)
+      : `<span class="cat"${tipAttr(anyTip(i.label))}>${esc(catLabel(i.label) || "—")}</span>`;
+    return `<div class="row">${lab}<span class="barmini"><b style="width:${(Number(i.n) / max) * 100}%;background:${color}"></b></span><span class="mono dim">${num(i.n)}</span></div>`;
   }).join("");
 }
 
@@ -213,11 +238,29 @@ async function loadOverview() {
 // ---------- Threat Center ----------
 function layerChips(ev) {
   const c = [];
-  (ev.l1_rules || []).slice(0, 3).forEach((r) => c.push(`<span class="lchip">${esc(r)}</span>`));
-  Object.entries(ev.l2_scores || {}).forEach(([, s]) => c.push(`<span class="lchip hot">L2 ${Number(s).toFixed(2)}</span>`));
-  if (ev.l3_verdict) c.push('<span class="lchip hot">L3</span>');
-  (ev.l4_signals || []).forEach((s) => c.push(`<span class="lchip hot">${esc(s)}</span>`));
+  // Every chip explains itself on hover — a bare "R-OVR-001" means nothing to
+  // anyone who hasn't read the rule pack.
+  (ev.l1_rules || []).slice(0, 3).forEach((r) =>
+    c.push(`<span class="lchip"${tipAttr(ruleTip(r) || LAYER_INFO.L1)}>${esc(r)}</span>`));
+  Object.entries(ev.l2_scores || {}).forEach(([, s]) =>
+    c.push(`<span class="lchip hot"${tipAttr(LAYER_INFO.L2)}>L2 ${Number(s).toFixed(2)}</span>`));
+  if (ev.l3_verdict) c.push(`<span class="lchip hot"${tipAttr(LAYER_INFO.L3)}>L3</span>`);
+  (ev.l4_signals || []).forEach((s) =>
+    c.push(`<span class="lchip hot"${tipAttr(signalTip(s) || LAYER_INFO.L4)}>${esc(s)}</span>`));
   return `<span class="layerchips">${c.join("") || '<span class="lchip">—</span>'}</span>`;
+}
+
+/** Provenance rendered as readable lines instead of a comma-joined id list. */
+function whyList(ev) {
+  const rows = [];
+  (ev.l1_rules || []).forEach((r) => rows.push([r, ruleTip(r) || "Matched an L1 heuristic rule."]));
+  (ev.l4_signals || []).forEach((s) => rows.push([s, signalTip(s) || "An L4 trace-analysis signal fired."]));
+  Object.entries(ev.l2_scores || {}).forEach(([m, s]) =>
+    rows.push([`L2 ${Number(s).toFixed(2)}`, `Classifier “${m}” scored this ${Number(s).toFixed(2)} out of 1.00 for being injection-like.`]));
+  if (ev.l3_verdict) rows.push(["L3", `AI judge verdict: ${ev.l3_verdict}`]);
+  if (!rows.length) return "";
+  return `<div class="why-list">${rows.map(([id, text]) =>
+    `<div class="why-row"><span class="why-id">${esc(id)}</span><span class="why-text">${esc(text)}</span></div>`).join("")}</div>`;
 }
 const tico = (t) => ({ retrieval: "R", tool: "T", generation: "G", span: "S", event: "E" }[t] || "S");
 
@@ -263,25 +306,33 @@ let feedRows = [];
 function renderFeed(rows) {
   feedRows = rows || [];
   const t = $("#attackFeed");
-  if (!feedRows.length) { t.innerHTML = '<tbody><tr><td class="empty"><div class="big">No security events</div>Send a trace to the ingestion API to see attacks here.</td></tr></tbody>'; return; }
+  if (!feedRows.length) {
+    t.innerHTML = `<tbody><tr><td>${emptyCta({
+      title: "No security events — that's the good outcome",
+      body: "Argus scanned everything it received and found nothing worth flagging. If you expected findings here, the two usual causes are below.",
+      steps: [
+        "Your time <b>Range</b> (top bar) may be excluding them — try <b>All time</b>.",
+        "Your app may not be sending traces yet. Check the Traces page: if it's empty too, the problem is ingestion, not detection.",
+        "Want to prove detection works? Send a trace containing a line like <code>Ignore all previous instructions</code> and watch it appear here.",
+      ],
+    })}</td></tr></tbody>`;
+    return;
+  }
   const head = `<thead><tr><th></th><th>Sev</th><th>Category</th><th>Outcome</th><th>Layers</th><th>Trace</th><th>When</th></tr></thead>`;
   const body = feedRows.map((ev, i) => `
     <tr class="evt s-${sevName(ev.severity)} clickable" data-i="${i}">
       <td class="stripe"><i></i></td><td>${pill(ev.severity)}</td>
-      <td><span class="cat">${esc(titleCase(ev.category))}</span>${ev.analyst_verdict && ev.analyst_verdict !== "unreviewed" ? ` <span class="verdict-tag verdict-${ev.analyst_verdict}">${esc(titleCase(ev.analyst_verdict))}</span>` : ""}</td>
+      <td>${catChip(ev.category)}${ev.analyst_verdict && ev.analyst_verdict !== "unreviewed" ? " " + verdictTag(ev.analyst_verdict) : ""}</td>
       <td>${outcomePill(ev.outcome)}</td><td>${layerChips(ev)}</td>
       <td><a class="tracelink">${esc(ev.trace_id)}</a></td><td class="dim num">${ago(ev.detected_at)}</td>
     </tr>
     <tr class="evidence" id="ev-${i}" style="display:none"><td colspan="7">
-      ${ev.evidence_excerpt ? `<div class="ev-label">Evidence</div><div class="ev-quote">${esc(ev.evidence_excerpt)}</div>` : ""}
-      <div class="ev-label" style="margin-top:10px">Provenance</div>
-      <dl class="kv" style="max-width:none">
-        <dt>score</dt><dd>${ev.score}</dd>
-        ${(ev.l1_rules || []).length ? `<dt>L1 rules</dt><dd>${esc((ev.l1_rules || []).join(", "))}</dd>` : ""}
-        ${Object.keys(ev.l2_scores || {}).length ? `<dt>L2 scores</dt><dd>${esc(JSON.stringify(ev.l2_scores))}</dd>` : ""}
-        ${ev.l3_verdict ? `<dt>L3 verdict</dt><dd>${esc(ev.l3_verdict)}</dd>` : ""}
-        ${(ev.l4_signals || []).length ? `<dt>L4 signals</dt><dd>${esc((ev.l4_signals || []).join(", "))}</dd>` : ""}
-      </dl>
+      ${explainBlock(ev)}
+      ${ev.evidence_excerpt ? `<div class="ev-label">Evidence — the text that triggered this</div><div class="ev-quote">${esc(ev.evidence_excerpt)}</div>` : ""}
+      <div class="ev-label" style="margin-top:10px">Risk score</div>
+      ${scoreBlock(ev.score)}
+      <div class="ev-label" style="margin-top:10px">Why this was flagged</div>
+      ${whyList(ev) || '<div class="dim" style="font-size:12px">No layer detail recorded.</div>'}
       <div class="ev-actions">
         <button class="btn btn-primary" data-open="${esc(ev.trace_id)}">Open trace</button>
         <button class="btn" data-verdict="confirmed" data-ev="${esc(ev.event_id)}">Confirm malicious</button>
@@ -325,14 +376,14 @@ async function loadIncidents() {
     pl.innerHTML = (d.poisoned || []).length ? d.poisoned.map((p) => `
       <div class="incident-card">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:5px;">${pill(p.max_sev)}<b>Recurring source</b><span class="mono dim" style="font-size:11px">${esc(String(p.content_sha256).slice(0, 16))}…</span><span style="margin-left:auto" class="dim">${num(p.traces)} traces · ${num(p.events)} events</span></div>
-        <div>${(p.categories || []).map((c) => `<span class="tag">${esc(titleCase(c))}</span>`).join("")}</div>
+        <div>${(p.categories || []).map((c) => catChip(c, "tag")).join("")}</div>
         ${p.evidence ? `<div class="dim" style="font-size:12px;margin-top:6px">${esc(String(p.evidence).slice(0, 140))}</div>` : ""}
       </div>`).join("") : '<div class="empty">No content seen across multiple traces yet.</div>';
     const il = $("#incidentList");
     il.innerHTML = (d.traceIncidents || []).length ? d.traceIncidents.map((t) => `
       <div class="incident-card clickable" data-trace="${esc(t.trace_id)}">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:5px;">${pill(t.max_sev)}<a class="tracelink">${esc(t.trace_id)}</a><span style="margin-left:auto" class="dim">${num(t.events)} events · ${ago(t.last_seen)}</span></div>
-        <div>${(t.categories || []).map((c) => `<span class="tag">${esc(titleCase(c))}</span>`).join("")}</div>
+        <div>${(t.categories || []).map((c) => catChip(c, "tag")).join("")}</div>
         ${t.evidence ? `<div class="dim" style="font-size:12px;margin-top:6px">${esc(String(t.evidence).slice(0, 140))}</div>` : ""}
       </div>`).join("") : '<div class="empty">No high/critical incidents in range.</div>';
     il.querySelectorAll("[data-trace]").forEach((c) => c.addEventListener("click", () => openTrace(c.dataset.trace, "incidents")));
@@ -352,7 +403,7 @@ async function loadReview() {
     if (!rows.length) { t.innerHTML = '<tbody><tr><td class="empty"><div class="big">Queue clear 🎉</div>No events awaiting review.</td></tr></tbody>'; return; }
     t.innerHTML = `<thead><tr><th></th><th>Sev</th><th>Category</th><th>Evidence</th><th>Trace</th><th>When</th><th>Action</th></tr></thead><tbody>` +
       rows.map((ev) => `<tr class="evt s-${sevName(ev.severity)}">
-        <td class="stripe"><i></i></td><td>${pill(ev.severity)}</td><td><span class="cat">${esc(titleCase(ev.category))}</span></td>
+        <td class="stripe"><i></i></td><td>${pill(ev.severity)}</td><td>${catChip(ev.category)}</td>
         <td class="dim" style="white-space:normal;max-width:340px">${esc(String(ev.evidence_excerpt || "").slice(0, 120))}</td>
         <td><a class="tracelink" data-open="${esc(ev.trace_id)}">${esc(ev.trace_id)}</a></td><td class="dim num">${ago(ev.detected_at)}</td>
         <td><button class="btn" style="padding:3px 8px" data-verdict="confirmed" data-ev="${esc(ev.event_id)}">Confirm</button> <button class="btn" style="padding:3px 8px" data-verdict="false_positive" data-ev="${esc(ev.event_id)}">Dismiss</button></td>
@@ -373,7 +424,19 @@ async function loadTraces() {
     const rows = await api("/api/traces"); banner("");
     $("#tracesSub").textContent = `${rows.length} recent traces`;
     const t = $("#tracesTable");
-    if (!rows.length) { t.innerHTML = '<tbody><tr><td class="empty">No traces yet.</td></tr></tbody>'; return; }
+    if (!rows.length) {
+      t.innerHTML = `<tbody><tr><td>${emptyCta({
+        title: "No traces yet",
+        body: "A trace is one end-to-end run of your app. Nothing has arrived for this application in the selected range.",
+        steps: [
+          "Check the <b>Range</b> filter in the top bar — try <b>All time</b>.",
+          "Confirm your app is posting to <code>/api/public/ingestion</code> or <code>/v1/traces</code> with this application's API key.",
+          "Not connected yet? Walk through the three-step setup and send a test message.",
+        ],
+        action: { href: "/onboard.html", label: "Connect this app →" },
+      })}</td></tr></tbody>`;
+      return;
+    }
     t.innerHTML = `<thead><tr><th>Trace</th><th>Name</th><th>Env</th><th>Spans</th><th>Tokens</th><th>Cost</th><th>Latency</th><th>Security</th><th>When</th></tr></thead><tbody>` +
       rows.map((r) => {
         const sec = Number(r.sec_events) > 0 ? `${pill(sevName(r.sec_max_severity))} <span class="dim">${num(r.sec_events)}</span>` : '<span class="dim">—</span>';
@@ -413,7 +476,7 @@ async function openTrace(id, back) {
       const hasHot = evs.some((e) => ["critical", "high"].includes(sevName(e.severity)));
       let cls = ""; if (o.taint === "untrusted_external") cls = "taint"; else if (Number(o.taint_influenced)) cls = "influenced"; if (hasHot) cls = "canary";
       const barCls = hasHot ? (evs.some((e) => sevName(e.severity) === "critical") ? "crit" : "warn") : "";
-      const flags = [...new Set(evs.flatMap((e) => e.l4_signals || []))].slice(0, 2).map((s) => `<span class="lchip hot">${esc(s)}</span>`).join("");
+      const flags = [...new Set(evs.flatMap((e) => e.l4_signals || []))].slice(0, 2).map((s) => `<span class="lchip hot"${tipAttr(signalTip(s) || LAYER_INFO.L4)}>${esc(s)}</span>`).join("");
       const d2 = isFinite(en) && isFinite(st) ? en - st : 0;
       return `<div class="wf-row ${cls}" data-idx="${idx}"><div class="wf-name"><span class="wf-ind">│</span><span class="tico ${o.type === "generation" ? "g" : o.type === "retrieval" ? "r" : ""}">${tico(o.type)}</span><span class="wf-label">${esc(o.name || o.type)}</span><span class="wf-flags">${flags}</span></div><div class="wf-track"><span class="wf-bar ${barCls}" style="left:${left}%;width:${width}%"></span><span class="wf-dur" style="left:${Math.min(left + width + 1, 82)}%">${dur(d2)}</span></div></div>`;
     }).join("") || '<div class="empty">No spans.</div>';
@@ -446,10 +509,12 @@ function renderTab(tab) {
   else if (tab === "attributes") {
     const attrs = o.attributes || {};
     const rows = [["type", o.type], ["taint", o.taint], ["taint_source", o.taint_source], ["model", o.model], ["provider", o.provider], ["tokens", `${o.input_tokens} in / ${o.output_tokens} out`], ["cost", money(o.cost)], ["finish", o.finish_reason], ...Object.entries(attrs)];
-    body.innerHTML = `<dl class="kv">${rows.filter(([, v]) => v !== "" && v != null).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(String(v))}</dd>`).join("")}</dl>`;
+    // `taint` and `type` are the two rows people ask about — explain them inline.
+    const attrTip = (k, v) => (k === "taint" ? TAINT_INFO[v] : k === "type" ? BREAKDOWN_INFO[v] : "");
+    body.innerHTML = `<dl class="kv">${rows.filter(([, v]) => v !== "" && v != null).map(([k, v]) => `<dt>${esc(k)}</dt><dd${tipAttr(attrTip(k, v))}>${esc(String(v))}</dd>`).join("")}</dl>`;
   } else {
     const evs = curEvByObs[o.observation_id] || [];
-    body.innerHTML = evs.length ? evs.map((e) => `<div class="sec-block"><div class="sec-block-head">${pill(e.severity)} ${esc(titleCase(e.category))} · <span class="dim">${esc(e.outcome)}</span></div><div class="sec-block-body">${e.evidence_excerpt ? `<div style="margin-bottom:8px">${esc(e.evidence_excerpt)}</div>` : ""}<dl class="kv"><dt>score</dt><dd>${e.score}</dd>${(e.l1_rules || []).length ? `<dt>L1</dt><dd>${esc((e.l1_rules || []).join(", "))}</dd>` : ""}${(e.l4_signals || []).length ? `<dt>L4</dt><dd>${esc((e.l4_signals || []).join(", "))}</dd>` : ""}${Object.keys(e.l2_scores || {}).length ? `<dt>L2</dt><dd>${esc(JSON.stringify(e.l2_scores))}</dd>` : ""}</dl><div class="ev-actions"><button class="btn" data-verdict="confirmed" data-ev="${esc(e.event_id)}">Confirm</button><button class="btn" data-verdict="false_positive" data-ev="${esc(e.event_id)}">False positive</button></div></div>`).join("") : '<div class="dim" style="font-size:12px">No security events on this span.</div>';
+    body.innerHTML = evs.length ? evs.map((e) => `<div class="sec-block"><div class="sec-block-head">${pill(e.severity)} ${catChip(e.category)} · ${outcomePill(e.outcome)}</div><div class="sec-block-body">${explainBlock(e)}${e.evidence_excerpt ? `<div class="ev-label">Evidence</div><div style="margin-bottom:8px">${esc(e.evidence_excerpt)}</div>` : ""}<div class="ev-label">Risk score</div>${scoreBlock(e.score)}${whyList(e) ? `<div class="ev-label" style="margin-top:10px">Why this was flagged</div>${whyList(e)}` : ""}<div class="ev-actions"><button class="btn" data-verdict="confirmed" data-ev="${esc(e.event_id)}">Confirm</button><button class="btn" data-verdict="false_positive" data-ev="${esc(e.event_id)}">False positive</button></div></div></div>`).join("") : '<div class="dim" style="font-size:12px">No security events on this span.</div>';
     body.querySelectorAll("[data-verdict]").forEach((b) => b.addEventListener("click", async () => { b.disabled = true; b.textContent = "…"; await postVerdict(b.dataset.ev, b.dataset.verdict); }));
   }
 }
@@ -462,7 +527,18 @@ async function loadSessions() {
     const rows = await api("/api/sessions"); banner("");
     $("#sessionsSub").textContent = `${rows.length} sessions`;
     const t = $("#sessionsTable");
-    if (!rows.length) { t.innerHTML = '<tbody><tr><td class="empty">No sessions yet.</td></tr></tbody>'; return; }
+    if (!rows.length) {
+      t.innerHTML = `<tbody><tr><td>${emptyCta({
+        title: "No sessions yet",
+        body: "Sessions group several traces into one conversation. They appear automatically once your traces carry a session ID.",
+        steps: [
+          "Set a <code>session_id</code> (or <code>sessionId</code>) on the traces your app sends.",
+          "Use the same value for every turn of a conversation — that's what links them together.",
+          "Add a <code>user_id</code> too if you can: it's what makes the Users count and repeat-offender analysis work.",
+        ],
+      })}</td></tr></tbody>`;
+      return;
+    }
     t.innerHTML = `<thead><tr><th>Session</th><th>User</th><th>Traces</th><th>Spans</th><th>Tokens</th><th>Cost</th><th>Security</th><th>Last seen</th></tr></thead><tbody>` +
       rows.map((r) => `<tr><td class="mono">${esc(r.session_id)}</td><td class="dim">${esc(r.user_id || "—")}</td><td class="num">${num(r.traces)}</td><td class="num">${num(r.spans)}</td><td class="num">${num(r.tokens)}</td><td class="num">${money(r.cost)}</td><td>${Number(r.events) > 0 ? pill(sevName(r.max_sev)) + ` <span class="dim">${num(r.events)}</span>` : '<span class="dim">—</span>'}</td><td class="dim num">${ago(r.last_seen)}</td></tr>`).join("") + "</tbody>";
     stamp();
@@ -499,7 +575,15 @@ async function loadEvals() {
   try {
     const d = await api("/api/prompts"); banner("");
     const rows = d.evalScores || [], t = $("#evalsTable");
-    t.innerHTML = rows.length ? `<thead><tr><th>Score</th><th>Count</th><th>Avg</th><th>Min</th><th>Max</th></tr></thead><tbody>` + rows.map((r) => `<tr><td>${esc(r.name)}</td><td class="num">${num(r.n)}</td><td class="num">${r.avg_value}</td><td class="num dim">${r.min_value}</td><td class="num dim">${r.max_value}</td></tr>`).join("") + "</tbody>" : '<tbody><tr><td class="empty"><div class="big">No eval scores yet</div>Submit scores via the scores API (LLM-as-judge, human annotation) to track quality here.</td></tr></tbody>';
+    t.innerHTML = rows.length ? `<thead><tr><th>Score</th><th>Count</th><th>Avg</th><th>Min</th><th>Max</th></tr></thead><tbody>` + rows.map((r) => `<tr><td>${esc(r.name)}</td><td class="num">${num(r.n)}</td><td class="num">${r.avg_value}</td><td class="num dim">${r.min_value}</td><td class="num dim">${r.max_value}</td></tr>`).join("") + "</tbody>" : `<tbody><tr><td>${emptyCta({
+      title: "No eval scores yet",
+      body: "Evals track how <i>good</i> your AI's answers are, separately from whether they're safe. Each row here is one score name with its average across every trace.",
+      steps: [
+        "Decide what to measure — e.g. <code>helpfulness</code>, <code>groundedness</code>, <code>sec.injection_risk</code>.",
+        "Score your traces with an LLM-as-judge run or human annotation.",
+        "Submit them to the scores API against a trace ID; they'll aggregate here automatically.",
+      ],
+    })}</td></tr></tbody>`;
     stamp();
   } catch (e) { banner("Evals query failed: " + e.message); }
 }
@@ -525,10 +609,48 @@ rangeMenu.querySelectorAll("[data-range]").forEach((b) => b.addEventListener("cl
 }));
 $("#refreshBtn").addEventListener("click", () => load(document.querySelector(".nav-item.active")?.dataset.nav || "overview"));
 
+// ---------- global search ----------
+// Deliberately client-side and dumb: a trace ID pasted from a log should open
+// that trace, and anything else filters the list you're already looking at.
+// The FAQ used to say "you can't look up a trace by ID" — this is that.
+const searchInput = $("#globalSearch");
+searchInput?.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  const q = searchInput.value.trim();
+  if (!q) return;
+  // A trace ID is long and has no spaces — treat it as "open this trace".
+  if (!/\s/.test(q) && q.length >= 12) { openTrace(q, "traces"); return; }
+  applyFilter(q);
+});
+searchInput?.addEventListener("input", () => { if (!searchInput.value.trim()) applyFilter(""); });
+
+/** Hides table rows / cards on the current view that don't contain the term. */
+function applyFilter(q) {
+  const term = q.toLowerCase();
+  const view = document.querySelector(".view.on");
+  if (!view) return;
+  let shown = 0, total = 0;
+  // Feed rows come in pairs (row + hidden evidence row); filter the visible one
+  // and keep its evidence row collapsed alongside it.
+  view.querySelectorAll("table tbody tr:not(.evidence), .incident-card").forEach((row) => {
+    total++;
+    const hit = !term || row.textContent.toLowerCase().includes(term);
+    row.style.display = hit ? "" : "none";
+    if (hit) shown++;
+    const ev = row.nextElementSibling;
+    if (ev && ev.classList.contains("evidence") && !hit) ev.style.display = "none";
+  });
+  const note = $("#searchNote");
+  if (note) note.textContent = term ? `${shown} of ${total} match “${q}”` : "";
+}
+
 // ---------- loader dispatch ----------
 // Views that only make sense inside a selected application.
 const SCOPED_VIEWS = new Set(["overview", "threat", "incidents", "review", "redteam", "traces", "sessions", "analytics", "prompts", "evals", "keys", "team", "audit"]);
 function load(view) {
+  // Any re-render replaces the rows the filter was hiding, so drop the stale
+  // "N of M match" note rather than leaving it contradicting the screen.
+  if (searchInput) { searchInput.value = ""; const n = $("#searchNote"); if (n) n.textContent = ""; }
   if (!PROJECT && SCOPED_VIEWS.has(view)) { banner("Select an application from Applications to view its data."); return; }
   ({ apps: loadApps, overview: loadOverview, threat: loadThreat, incidents: loadIncidents, review: loadReview, traces: loadTraces, sessions: loadSessions, analytics: loadAnalytics, evals: loadEvals, keys: loadKeys, team: loadTeam, audit: loadAudit, admin: loadAdmin, customers: loadCustomers, adminusers: loadAdminUsers, auditall: loadAuditAll }[view] || (() => {}))();
 }

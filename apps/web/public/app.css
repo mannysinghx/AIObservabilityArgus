@@ -397,3 +397,85 @@
     .rail { display: none; }
     .kpis { grid-template-columns: repeat(2, 1fr); }
   }
+
+  /* ---------- plain-English layer: tooltips, explainers, search ---------- */
+  /* Shared floating tooltip (positioned by glossary.js so table overflow can't clip it). */
+  .tipbubble {
+    position: fixed; z-index: 200; display: none;
+    background: var(--ink); color: var(--surface);
+    font-size: 11.5px; line-height: 1.5; font-weight: 400;
+    padding: 7px 10px; border-radius: var(--radius);
+    box-shadow: 0 6px 22px rgba(0,0,0,.22); pointer-events: none;
+  }
+  [data-tip] { cursor: help; }
+  /* A dotted underline is the only affordance that says "there's an explanation here". */
+  .cat[data-tip], .lchip[data-tip], .kpi .lab[data-tip] {
+    text-decoration: underline dotted var(--ink-faint); text-underline-offset: 3px;
+  }
+
+  /* "What this means / What to do" panel on every expanded finding. */
+  .explain {
+    border-left: 2px solid var(--accent); background: var(--accent-soft);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    padding: calc(var(--u)*2.2) calc(var(--u)*2.8); margin-bottom: calc(var(--u)*2.4);
+  }
+  .explain-head {
+    font-size: 9.5px; letter-spacing: .09em; text-transform: uppercase;
+    color: var(--accent); font-weight: 700; margin-bottom: 4px;
+  }
+  .explain-head + .explain-head, .explain-eg + .explain-head { margin-top: 10px; }
+  .explain-lead { margin: 0 0 6px; font-size: 12.5px; line-height: 1.6; color: var(--ink); max-width: 78ch; }
+  .explain-eg { margin: 0; font-size: 12px; line-height: 1.55; color: var(--ink-muted); max-width: 78ch; }
+  .explain-todo { margin: 0; padding-left: 18px; font-size: 12.5px; line-height: 1.65; color: var(--ink-muted); max-width: 78ch; }
+  .explain-todo li { margin-bottom: 2px; }
+
+  /* Risk score, with the 0-100 scale made explicit. */
+  .scorebar { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+  .scorebar-val { font-family: var(--font-mono); font-size: 15px; font-weight: 700; color: var(--ink); }
+  .scorebar-scale { color: var(--ink-faint); font-size: 11px; margin-left: -5px; }
+  .scorebar-track {
+    flex: 1; max-width: 160px; height: 6px; border-radius: 99px;
+    background: var(--surface-2); overflow: hidden;
+  }
+  .scorebar-track b { display: block; height: 100%; }
+  .scorebar-track b.s-critical { background: var(--sev-critical); }
+  .scorebar-track b.s-high { background: var(--sev-high); }
+  .scorebar-track b.s-medium { background: var(--sev-medium); }
+  .scorebar-track b.s-low { background: var(--sev-low); }
+  .scorebar-word { color: var(--ink-muted); font-size: 11.5px; }
+
+  /* Rule / signal chips expanded into readable lines inside Provenance. */
+  .why-list { display: grid; gap: 5px; margin: 2px 0 0; }
+  .why-row { display: flex; gap: 8px; align-items: baseline; font-size: 12px; }
+  .why-row .why-id {
+    font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-faint);
+    background: var(--surface-2); border-radius: 4px; padding: 1px 6px; flex: none;
+  }
+  .why-row .why-text { color: var(--ink-muted); line-height: 1.5; }
+
+  /* Global search in the top bar. */
+  .searchbox { position: relative; display: flex; align-items: center; }
+  .searchbox input {
+    font: inherit; font-size: 12px; width: 190px;
+    padding: 5px 9px 5px 26px;
+    border: 1px solid var(--line); border-radius: var(--radius);
+    background: var(--surface); color: var(--ink);
+  }
+  .searchbox input::placeholder { color: var(--ink-faint); }
+  .searchbox input:focus { outline: none; border-color: var(--accent); width: 250px; }
+  .searchbox .s-ico { position: absolute; left: 9px; color: var(--ink-faint); font-size: 11px; pointer-events: none; }
+  @media (prefers-reduced-motion: no-preference) { .searchbox input { transition: width .15s ease, border-color .13s ease; } }
+
+  /* Richer empty states: tell people how to get data, don't just say there's none. */
+  .empty-cta { display: grid; gap: calc(var(--u)*2); justify-items: center; padding: calc(var(--u)*5) calc(var(--u)*4); text-align: center; }
+  .empty-cta .big { font-size: 15px; color: var(--ink); }
+  .empty-cta p { margin: 0; font-size: 12.5px; color: var(--ink-muted); max-width: 56ch; line-height: 1.65; }
+  .empty-steps { text-align: left; display: grid; gap: 7px; margin: 0 auto; max-width: 46ch; }
+  .empty-steps .es-row { display: flex; gap: 9px; align-items: flex-start; font-size: 12.5px; color: var(--ink-muted); line-height: 1.55; }
+  .empty-steps .es-n {
+    flex: none; width: 18px; height: 18px; border-radius: 50%;
+    background: var(--accent-soft); color: var(--accent);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700; margin-top: 1px;
+  }
+  .empty-cta code { font-family: var(--font-mono); font-size: 11.5px; background: var(--surface-2); border-radius: 4px; padding: 1px 5px; }

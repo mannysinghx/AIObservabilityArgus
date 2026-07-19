@@ -521,7 +521,10 @@ rangeMenu.querySelectorAll("[data-range]").forEach((b) => b.addEventListener("cl
 $("#refreshBtn").addEventListener("click", () => load(document.querySelector(".nav-item.active")?.dataset.nav || "overview"));
 
 // ---------- loader dispatch ----------
+// Views that only make sense inside a selected application.
+const SCOPED_VIEWS = new Set(["overview", "threat", "incidents", "review", "redteam", "traces", "sessions", "analytics", "prompts", "evals", "keys", "team", "audit"]);
 function load(view) {
+  if (!PROJECT && SCOPED_VIEWS.has(view)) { banner("Select an application from Applications to view its data."); return; }
   ({ apps: loadApps, overview: loadOverview, threat: loadThreat, incidents: loadIncidents, review: loadReview, traces: loadTraces, sessions: loadSessions, analytics: loadAnalytics, evals: loadEvals, keys: loadKeys, team: loadTeam, audit: loadAudit, admin: loadAdmin, customers: loadCustomers, adminusers: loadAdminUsers, auditall: loadAuditAll }[view] || (() => {}))();
 }
 
@@ -812,6 +815,14 @@ const GUIDE_DEEP_LINK = new URLSearchParams(location.search).get("guide");
   const user = await requireAuth();
   if (!user) return; // redirected to /login.html
   renderUser(user);
+  // Per-app views (Overview, Security, Observability, Engineering) only make
+  // sense with an application selected. On the unscoped "All applications" view,
+  // hide them so you can't land on a data page with nothing to show.
+  if (!PROJECT) {
+    document.querySelectorAll(".app-nav").forEach((g) => { g.style.display = "none"; });
+    const ov = document.getElementById("navOverview");
+    if (ov) ov.style.display = "none";
+  }
   if (GUIDE_DEEP_LINK === "onboarding") {
     show("guide");
     const target = document.getElementById("g-onboarding");

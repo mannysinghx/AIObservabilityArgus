@@ -101,7 +101,7 @@ function breakdown(sel, items, isSev) {
 }
 
 // ---------- routing ----------
-const VIEWS = ["apps", "overview", "threat", "incidents", "review", "redteam", "traces", "trace", "sessions", "analytics", "prompts", "evals", "keys", "team", "appearance", "guide"];
+const VIEWS = ["apps", "overview", "threat", "incidents", "review", "redteam", "traces", "trace", "sessions", "analytics", "prompts", "evals", "keys", "team", "admin", "customers", "adminusers", "appearance", "guide"];
 function show(view) {
   VIEWS.forEach((v) => $(`#view-${v}`).classList.toggle("on", v === view));
   document.querySelectorAll(".nav-item[data-nav]").forEach((b) => b.classList.toggle("active", b.dataset.nav === view));
@@ -521,7 +521,92 @@ $("#refreshBtn").addEventListener("click", () => load(document.querySelector(".n
 
 // ---------- loader dispatch ----------
 function load(view) {
-  ({ apps: loadApps, overview: loadOverview, threat: loadThreat, incidents: loadIncidents, review: loadReview, traces: loadTraces, sessions: loadSessions, analytics: loadAnalytics, evals: loadEvals, keys: loadKeys, team: loadTeam }[view] || (() => {}))();
+  ({ apps: loadApps, overview: loadOverview, threat: loadThreat, incidents: loadIncidents, review: loadReview, traces: loadTraces, sessions: loadSessions, analytics: loadAnalytics, evals: loadEvals, keys: loadKeys, team: loadTeam, admin: loadAdmin, customers: loadCustomers, adminusers: loadAdminUsers }[view] || (() => {}))();
+}
+
+// ---------- Platform admin: overview (all customers) ----------
+async function loadAdmin() {
+  try {
+    const d = await (await fetch("/api/admin/overview")).json(); banner("");
+    const t = d.totals || {};
+    $("#adminKpis1").innerHTML =
+      tile("Customers", num(t.orgs), num(t.projects) + " apps") +
+      tile("Users", num(t.users), num(t.admins) + " platform admins") +
+      tile("Applications", num(t.projects), "") +
+      tile("Security events", num(t.securityEvents), num(t.highCritical) + " high/critical", Number(t.highCritical) > 0);
+    $("#adminKpis2").innerHTML =
+      tile("Traces", num(t.traces), "") +
+      tile("Spans", num(t.observations), "") +
+      tile("Tokens", num(t.tokens), "") +
+      tile("Total cost", money(t.cost), "across all customers") +
+      tile("Unreviewed", num(t.unreviewed), "security events");
+    const rows = d.topOrgs || [];
+    $("#topOrgsTable").innerHTML = `<thead><tr><th>Company</th><th>Apps</th><th>Tokens</th><th>Cost</th><th>Sec events</th></tr></thead><tbody>` +
+      (rows.length ? rows.map((o) => `<tr><td>${esc(o.org)}</td><td class="num">${num(o.projects)}</td><td class="num">${num(o.tokens)}</td><td class="num">${money(o.cost)}</td><td class="num">${num(o.secEvents)}</td></tr>`).join("") : '<tr><td class="empty">No customer data yet.</td></tr>') + "</tbody>";
+    stamp();
+  } catch (e) { banner("Platform overview failed: " + e.message); }
+}
+
+// ---------- Platform admin: companies ----------
+async function loadCustomers() {
+  try {
+    const d = await (await fetch("/api/admin/orgs")).json(); banner("");
+    const orgs = d.orgs || [];
+    $("#customersSub").textContent = `${orgs.length} companies`;
+    $("#customersTable").innerHTML = `<thead><tr><th>Company</th><th>Apps</th><th>Members</th><th>Created</th><th></th></tr></thead><tbody>` +
+      orgs.map((o) => `<tr><td>${esc(o.name)}</td><td class="num">${num(o.projectCount)}</td><td class="num">${num(o.memberCount)}</td><td class="dim">${o.createdAt ? ago(o.createdAt) : ""}</td><td style="text-align:right"><button class="btn" data-rename="${esc(o.id)}" data-name="${esc(o.name)}" style="padding:3px 9px;font-size:11px">Rename</button> <button class="btn" data-delorg="${esc(o.id)}" data-name="${esc(o.name)}" style="padding:3px 9px;font-size:11px;color:var(--sev-critical)">Delete</button></td></tr>`).join("") + "</tbody>";
+    document.querySelectorAll("[data-rename]").forEach((b) => b.addEventListener("click", async () => {
+      const name = prompt("Rename company:", b.dataset.name); if (!name || name === b.dataset.name) return;
+      const r = await fetch("/api/admin/orgs/" + encodeURIComponent(b.dataset.rename), { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }) });
+      if (!r.ok) banner((await r.json().catch(() => ({}))).error || "Rename failed");
+      loadCustomers();
+    }));
+    document.querySelectorAll("[data-delorg]").forEach((b) => b.addEventListener("click", async () => {
+      if (!confirm(`Delete company "${b.dataset.name}"? This permanently removes its apps, keys, members, and ALL trace + security data. This cannot be undone.`)) return;
+      const r = await fetch("/api/admin/orgs/" + encodeURIComponent(b.dataset.delorg), { method: "DELETE" });
+      if (!r.ok) banner((await r.json().catch(() => ({}))).error || "Delete failed");
+      else { const j = await r.json(); banner(`Deleted "${b.dataset.name}" — purged ${j.projectsPurged} app(s) of data.`); setTimeout(() => banner(""), 4000); }
+      loadCustomers();
+    }));
+    stamp();
+  } catch (e) { banner("Companies query failed: " + e.message); }
+}
+$("#createOrgBtn")?.addEventListener("click", async () => {
+  const name = $("#newOrgName").value.trim(); if (!name) return;
+  const r = await fetch("/api/admin/orgs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }) });
+  if (!r.ok) { banner((await r.json().catch(() => ({}))).error || "Create failed"); return; }
+  $("#newOrgName").value = ""; loadCustomers();
+});
+
+// ---------- Platform admin: users ----------
+async function loadAdminUsers() {
+  try {
+    const d = await (await fetch("/api/admin/users")).json(); banner("");
+    const users = d.users || [];
+    $("#adminUsersSub").textContent = `${users.length} users`;
+    $("#adminUsersTable").innerHTML = `<thead><tr><th>User</th><th>Orgs</th><th>Verified</th><th>Platform admin</th><th></th></tr></thead><tbody>` +
+      users.map((u) => {
+        const you = u.id === ME_ID;
+        return `<tr>
+          <td>${esc(u.name || u.email)}${u.name ? ` <span class="dim">${esc(u.email)}</span>` : ""}${you ? ' <span class="dim">(you)</span>' : ""}</td>
+          <td class="num">${num(u.orgCount)}</td>
+          <td>${u.emailVerified ? '<span style="color:var(--ok);font-size:11.5px">✓ verified</span>' : '<span class="dim" style="font-size:11.5px">unverified</span>'}</td>
+          <td><input type="checkbox" data-admin-user="${esc(u.id)}" ${u.isPlatformAdmin ? "checked" : ""} ${you ? "disabled" : ""}></td>
+          <td style="text-align:right">${you ? "" : `<button class="btn" data-deluser="${esc(u.id)}" data-email="${esc(u.email)}" style="padding:3px 9px;font-size:11px;color:var(--sev-critical)">Remove</button>`}</td></tr>`;
+      }).join("") + "</tbody>";
+    document.querySelectorAll("[data-admin-user]").forEach((c) => c.addEventListener("change", async () => {
+      const r = await fetch("/api/admin/users/" + encodeURIComponent(c.dataset.adminUser) + "/platform-admin", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ value: c.checked }) });
+      if (!r.ok) banner((await r.json().catch(() => ({}))).error || "Update failed");
+      loadAdminUsers();
+    }));
+    document.querySelectorAll("[data-deluser]").forEach((b) => b.addEventListener("click", async () => {
+      if (!confirm(`Remove user ${b.dataset.email}? They lose access immediately.`)) return;
+      const r = await fetch("/api/admin/users/" + encodeURIComponent(b.dataset.deluser), { method: "DELETE" });
+      if (!r.ok) banner((await r.json().catch(() => ({}))).error || "Remove failed");
+      loadAdminUsers();
+    }));
+    stamp();
+  } catch (e) { banner("Users query failed: " + e.message); }
 }
 
 // ---------- API Keys (admin+) ----------
@@ -634,11 +719,14 @@ async function requireAuth() {
   location.href = "/login.html";
   return null;
 }
+let ME_ID = null;
 function renderUser(u) {
+  ME_ID = u.id;
   const initial = (u.name || u.email || "?").trim().charAt(0).toUpperCase() || "?";
   const btn = $("#userBtn"); if (btn) { btn.textContent = initial; btn.title = u.email; }
   const em = $("#userEmail"); if (em) em.textContent = u.email;
   if (u.emailVerified === false) showVerifyBanner();
+  if (u.isPlatformAdmin) { const g = $("#adminGroup"); if (g) g.style.display = ""; }
 }
 function showVerifyBanner() {
   const bar = $("#verifyBanner"), msg = $("#verifyMsg");

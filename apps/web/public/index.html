@@ -108,6 +108,12 @@
       <button class="nav-item" type="button" data-nav="keys" id="navKeys"><span class="nav-ico">⚿</span>API Keys</button>
       <button class="nav-item" type="button" data-nav="team"><span class="nav-ico">◍</span>Team</button>
     </div>
+    <div class="nav-group" id="adminGroup" style="display:none">
+      <div class="nav-label">Platform admin</div>
+      <button class="nav-item" type="button" data-nav="admin"><span class="nav-ico">◆</span>Platform</button>
+      <button class="nav-item" type="button" data-nav="customers"><span class="nav-ico">▤</span>Companies</button>
+      <button class="nav-item" type="button" data-nav="adminusers"><span class="nav-ico">◉</span>Users</button>
+    </div>
     <div class="rail-foot">
       <a class="nav-item" href="/onboard.html" style="text-decoration:none;"><span class="nav-ico">+</span>Connect a new app</a>
       <button class="nav-item" type="button" data-nav="guide"><span class="nav-ico">ℹ</span>User Guide</button>
@@ -181,6 +187,31 @@
           <div class="card-head"><span class="card-title">Members</span></div>
           <div class="tablewrap"><table id="teamTable"><tbody><tr><td class="loading">loading…</td></tr></tbody></table></div>
         </div>
+      </section>
+
+      <!-- PLATFORM ADMIN: overview -->
+      <section class="view" id="view-admin">
+        <div class="page-head"><h1 class="page-title">Platform</h1><span class="page-sub"><span class="live-dot"></span>operator view · all customers</span></div>
+        <div class="kpis" id="adminKpis1"></div>
+        <div class="kpis" id="adminKpis2"></div>
+        <div class="card"><div class="card-head"><span class="card-title">Top customers by cost</span></div><div class="tablewrap"><table id="topOrgsTable"><tbody><tr><td class="loading">loading…</td></tr></tbody></table></div></div>
+      </section>
+
+      <!-- PLATFORM ADMIN: companies -->
+      <section class="view" id="view-customers">
+        <div class="page-head"><h1 class="page-title">Companies</h1><span class="page-sub"><span id="customersSub">loading…</span></span></div>
+        <div class="card">
+          <div class="card-head"><span class="card-title">All companies</span>
+            <span style="display:flex;gap:6px"><input id="newOrgName" placeholder="New company name" style="font:inherit;font-size:12px;padding:5px 9px;border:1px solid var(--line);border-radius:5px;background:var(--surface);color:var(--ink)"><button class="btn btn-primary" id="createOrgBtn" type="button" style="padding:5px 11px;font-size:12px">Create</button></span>
+          </div>
+          <div class="tablewrap"><table id="customersTable"><tbody><tr><td class="loading">loading…</td></tr></tbody></table></div>
+        </div>
+      </section>
+
+      <!-- PLATFORM ADMIN: users -->
+      <section class="view" id="view-adminusers">
+        <div class="page-head"><h1 class="page-title">Users</h1><span class="page-sub"><span id="adminUsersSub">loading…</span></span></div>
+        <div class="card"><div class="card-head"><span class="card-title">All users</span></div><div class="tablewrap"><table id="adminUsersTable"><tbody><tr><td class="loading">loading…</td></tr></tbody></table></div></div>
       </section>
 
       <!-- OVERVIEW -->

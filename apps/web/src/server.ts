@@ -6,6 +6,7 @@ import { config } from "@argus/shared";
 import * as Q from "./queries.js";
 import * as Onboarding from "./onboarding.js";
 import * as Auth from "./auth.js";
+import * as Admin from "./admin.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, "..", "public");
@@ -100,7 +101,7 @@ function guard<T>(name: string, fn: (range: string | undefined, projectId: strin
     const user = userOf(req)!; // preHandler guarantees a user here
     const { range, project } = (req.query as ScopedQuery | undefined) || {};
     if (!project) { reply.code(400).send({ error: "project required" }); return; }
-    if (!(await Auth.userCanAccessProject(user.id, project))) {
+    if (!user.isPlatformAdmin && !(await Auth.userCanAccessProject(user.id, project))) {
       reply.code(403).send({ error: "forbidden" });
       return;
     }
@@ -126,13 +127,15 @@ guard("prompts", () => Q.prompts());
 // Catalog: only the customers (orgs) this user belongs to, and their apps.
 app.get("/api/projects", async (req, reply) => {
   const user = userOf(req)!;
-  try { return await Onboarding.listProjectsWithStats(await Auth.userOrgIds(user.id)); }
-  catch (err) { app.log.error({ err }, "projects failed"); reply.code(503).send({ error: "query failed", detail: String(err) }); }
+  try {
+    const orgIds = user.isPlatformAdmin ? await Auth.allOrgIds() : await Auth.userOrgIds(user.id);
+    return await Onboarding.listProjectsWithStats(orgIds);
+  } catch (err) { app.log.error({ err }, "projects failed"); reply.code(503).send({ error: "query failed", detail: String(err) }); }
 });
 
 app.get<{ Params: { id: string } }>("/api/project/:id", async (req, reply) => {
   const user = userOf(req)!;
-  const role = await Auth.userRoleForProject(user.id, req.params.id);
+  const role = user.isPlatformAdmin ? "owner" : await Auth.userRoleForProject(user.id, req.params.id);
   if (!role) { reply.code(403).send({ error: "forbidden" }); return; }
   try {
     const meta = await Onboarding.getProjectMeta(req.params.id);
@@ -152,7 +155,7 @@ async function roleGate(
 ): Promise<{ orgId: string; role: string } | null> {
   const user = userOf(req)!;
   if (!project) { reply.code(400).send({ error: "project required" }); return null; }
-  const role = await Auth.userRoleForProject(user.id, project);
+  const role = user.isPlatformAdmin ? "owner" : await Auth.userRoleForProject(user.id, project);
   if (!role) { reply.code(403).send({ error: "forbidden" }); return null; }
   if (!Auth.atLeast(role, min)) { reply.code(403).send({ error: `requires ${min} role` }); return null; }
   const orgId = await Auth.orgIdForProject(project);
@@ -225,7 +228,7 @@ app.post<{ Body: { project?: string; userId?: string; email?: string } }>("/api/
 app.get<{ Params: { id: string }; Querystring: ScopedQuery }>("/api/trace/:id", async (req, reply) => {
   const user = userOf(req)!;
   const project = req.query.project;
-  if (!project || !(await Auth.userCanAccessProject(user.id, project))) { reply.code(403).send({ error: "forbidden" }); return; }
+  if (!project || (!user.isPlatformAdmin && !(await Auth.userCanAccessProject(user.id, project)))) { reply.code(403).send({ error: "forbidden" }); return; }
   try { return await Q.traceDetail(req.params.id, project); }
   catch (err) { app.log.error({ err }, "trace failed"); reply.code(503).send({ error: String(err) }); }
 });
@@ -235,7 +238,7 @@ app.post<{ Body: { eventId?: string; verdict?: string; project?: string } }>("/a
   const user = userOf(req)!;
   const { eventId, verdict, project } = req.body || {};
   if (!eventId || !verdict) { reply.code(400).send({ error: "eventId and verdict required" }); return; }
-  if (!project || !(await Auth.userCanAccessProject(user.id, project))) { reply.code(403).send({ error: "forbidden" }); return; }
+  if (!project || (!user.isPlatformAdmin && !(await Auth.userCanAccessProject(user.id, project)))) { reply.code(403).send({ error: "forbidden" }); return; }
   try {
     const ok = await Q.setVerdict(eventId, verdict);
     if (!ok) { reply.code(404).send({ error: "event not found" }); return; }
@@ -244,6 +247,68 @@ app.post<{ Body: { eventId?: string; verdict?: string; project?: string } }>("/a
     app.log.error({ err }, "verdict failed");
     reply.code(500).send({ error: String(err) });
   }
+});
+
+// ---------------- platform admin (super-admin) ----------------
+// Every route here requires the platform-admin flag. This is the operator layer
+// above tenant roles: full visibility and control over all users and companies.
+function requireAdmin(req: unknown, reply: import("fastify").FastifyReply): boolean {
+  if (userOf(req)?.isPlatformAdmin) return true;
+  reply.code(403).send({ error: "platform admin only" });
+  return false;
+}
+
+app.get("/api/admin/overview", async (req, reply) => {
+  if (!requireAdmin(req, reply)) return;
+  try { return await Admin.platformOverview(); }
+  catch (err) { app.log.error({ err }, "admin overview failed"); reply.code(503).send({ error: "query failed", detail: String(err) }); }
+});
+
+app.get("/api/admin/users", async (req, reply) => {
+  if (!requireAdmin(req, reply)) return;
+  try { return { users: await Admin.listUsers() }; }
+  catch (err) { app.log.error({ err }, "admin users failed"); reply.code(503).send({ error: String(err) }); }
+});
+
+app.get("/api/admin/orgs", async (req, reply) => {
+  if (!requireAdmin(req, reply)) return;
+  try { return { orgs: await Admin.listOrgs() }; }
+  catch (err) { app.log.error({ err }, "admin orgs failed"); reply.code(503).send({ error: String(err) }); }
+});
+
+app.post<{ Params: { id: string }; Body: { value?: boolean } }>("/api/admin/users/:id/platform-admin", async (req, reply) => {
+  if (!requireAdmin(req, reply)) return;
+  const r = await Admin.setPlatformAdmin(req.params.id, req.body?.value === true);
+  if ("error" in r) { reply.code(400).send(r); return; }
+  return r;
+});
+
+app.delete<{ Params: { id: string } }>("/api/admin/users/:id", async (req, reply) => {
+  if (!requireAdmin(req, reply)) return;
+  if (req.params.id === userOf(req)!.id) { reply.code(400).send({ error: "You can't delete your own account here." }); return; }
+  const r = await Admin.deleteUser(req.params.id);
+  if ("error" in r) { reply.code(400).send(r); return; }
+  return r;
+});
+
+app.post<{ Body: { name?: string } }>("/api/admin/orgs", async (req, reply) => {
+  if (!requireAdmin(req, reply)) return;
+  const r = await Admin.createOrg(req.body?.name || "");
+  if ("error" in r) { reply.code(400).send(r); return; }
+  return r;
+});
+
+app.patch<{ Params: { id: string }; Body: { name?: string } }>("/api/admin/orgs/:id", async (req, reply) => {
+  if (!requireAdmin(req, reply)) return;
+  const r = await Admin.renameOrg(req.params.id, req.body?.name || "");
+  if ("error" in r) { reply.code(400).send(r); return; }
+  return r;
+});
+
+app.delete<{ Params: { id: string } }>("/api/admin/orgs/:id", async (req, reply) => {
+  if (!requireAdmin(req, reply)) return;
+  try { return await Admin.deleteOrg(req.params.id); }
+  catch (err) { app.log.error({ err }, "admin org delete failed"); reply.code(500).send({ error: String(err) }); }
 });
 
 // ---------------- onboarding (add an app to your org) ----------------

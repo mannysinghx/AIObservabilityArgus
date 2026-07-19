@@ -39,6 +39,7 @@ export interface SessionUser {
   email: string;
   name: string;
   emailVerified: boolean;
+  isPlatformAdmin: boolean;
 }
 
 export interface AuthError {
@@ -83,9 +84,10 @@ export async function signup(
     // immediately. Otherwise the account starts unverified and gets an email.
     const verified = isFirst || !Email.configured();
 
+    // The first account is the platform operator — a super-admin over everything.
     const ins = await client.query<{ id: string }>(
-      "INSERT INTO users (email, name, password_hash, email_verified) VALUES ($1, $2, $3, $4) RETURNING id",
-      [email, nm, hashPassword(password), verified],
+      "INSERT INTO users (email, name, password_hash, email_verified, is_platform_admin) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+      [email, nm, hashPassword(password), verified, isFirst],
     );
     const userId = ins.rows[0].id;
 
@@ -135,7 +137,7 @@ export async function signup(
     const token = await createSession(client, userId);
     await client.query("COMMIT");
     if (verifyLink) void Email.sendVerification(email, nm, verifyLink); // fire-and-forget
-    return { token, user: { id: userId, email, name: nm, emailVerified: verified } };
+    return { token, user: { id: userId, email, name: nm, emailVerified: verified, isPlatformAdmin: isFirst } };
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;
@@ -149,8 +151,8 @@ export async function login(
   password: string,
 ): Promise<{ token: string; user: SessionUser } | AuthError> {
   const email = String(emailRaw || "").trim().toLowerCase();
-  const r = await pool.query<{ id: string; email: string; name: string; password_hash: string; email_verified: boolean }>(
-    "SELECT id, email, name, password_hash, email_verified FROM users WHERE email = $1",
+  const r = await pool.query<{ id: string; email: string; name: string; password_hash: string; email_verified: boolean; is_platform_admin: boolean }>(
+    "SELECT id, email, name, password_hash, email_verified, is_platform_admin FROM users WHERE email = $1",
     [email],
   );
   const u = r.rows[0];
@@ -159,7 +161,7 @@ export async function login(
   }
   await activateInvites(pool, u.id, u.email); // pick up invites created since last login
   const token = await createSession(pool, u.id);
-  return { token, user: { id: u.id, email: u.email, name: u.name, emailVerified: u.email_verified } };
+  return { token, user: { id: u.id, email: u.email, name: u.name, emailVerified: u.email_verified, isPlatformAdmin: u.is_platform_admin } };
 }
 
 async function createSession(
@@ -178,14 +180,14 @@ async function createSession(
 /** Resolve the signed-in user from a session token, or null. */
 export async function sessionUser(token: string | undefined): Promise<SessionUser | null> {
   if (!token) return null;
-  const r = await pool.query<{ id: string; email: string; name: string; email_verified: boolean }>(
-    `SELECT u.id, u.email, u.name, u.email_verified
+  const r = await pool.query<{ id: string; email: string; name: string; email_verified: boolean; is_platform_admin: boolean }>(
+    `SELECT u.id, u.email, u.name, u.email_verified, u.is_platform_admin
      FROM user_sessions s JOIN users u ON u.id = s.user_id
      WHERE s.token_hash = $1 AND s.expires_at > now()`,
     [sha256(token)],
   );
   const u = r.rows[0];
-  return u ? { id: u.id, email: u.email, name: u.name, emailVerified: u.email_verified } : null;
+  return u ? { id: u.id, email: u.email, name: u.name, emailVerified: u.email_verified, isPlatformAdmin: u.is_platform_admin } : null;
 }
 
 export async function logout(token: string | undefined): Promise<void> {
@@ -232,6 +234,12 @@ export async function resendVerification(userId: string, email: string, name: st
 export async function userOrgIds(userId: string): Promise<string[]> {
   const r = await pool.query<{ org_id: string }>("SELECT org_id FROM memberships WHERE user_id = $1", [userId]);
   return r.rows.map((x) => x.org_id);
+}
+
+/** Every org id — the platform-admin catalog scope. */
+export async function allOrgIds(): Promise<string[]> {
+  const r = await pool.query<{ id: string }>("SELECT id FROM organizations");
+  return r.rows.map((x) => x.id);
 }
 
 /** Is `projectId` inside one of the user's organizations? */

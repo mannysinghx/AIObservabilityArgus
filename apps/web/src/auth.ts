@@ -10,6 +10,9 @@ function baseUrl(): string {
 function verificationLink(token: string): string {
   return `${baseUrl()}/api/auth/verify?token=${encodeURIComponent(token)}`;
 }
+function resetLink(token: string): string {
+  return `${baseUrl()}/reset.html?token=${encodeURIComponent(token)}`;
+}
 
 // ---------------- password hashing (scrypt, stdlib — no native dep) ----------------
 
@@ -226,6 +229,45 @@ export async function resendVerification(userId: string, email: string, name: st
   );
   await Email.sendVerification(email, name, verificationLink(vtoken));
   return { sent: true, configured: Email.configured() };
+}
+
+// ---------------- password reset ----------------
+
+/**
+ * Start a password reset. If the email has an account, email a single-use reset
+ * link. Always returns the same {ok:true} regardless — never reveal whether an
+ * address is registered (anti-enumeration).
+ */
+export async function requestPasswordReset(emailRaw: string): Promise<{ ok: true }> {
+  const email = String(emailRaw || "").trim().toLowerCase();
+  const r = await pool.query<{ id: string; name: string }>("SELECT id, name FROM users WHERE email = $1", [email]);
+  const u = r.rows[0];
+  if (u) {
+    await pool.query("DELETE FROM password_resets WHERE user_id = $1", [u.id]);
+    const token = randomBytes(24).toString("base64url");
+    await pool.query(
+      "INSERT INTO password_resets (token_hash, user_id, expires_at) VALUES ($1, $2, now() + interval '1 hour')",
+      [sha256(token), u.id],
+    );
+    await Email.sendPasswordReset(email, u.name, resetLink(token));
+  }
+  return { ok: true };
+}
+
+/** Complete a reset: set the new password, consume the token, and sign the user
+ *  out everywhere (invalidate all their sessions). */
+export async function resetPassword(token: string, newPassword: string): Promise<{ ok: true } | AuthError> {
+  if (!newPassword || newPassword.length < 8) return { error: "Password must be at least 8 characters." };
+  const r = await pool.query<{ user_id: string }>(
+    "SELECT user_id FROM password_resets WHERE token_hash = $1 AND expires_at > now()",
+    [sha256(token)],
+  );
+  const row = r.rows[0];
+  if (!row) return { error: "This reset link is invalid or has expired." };
+  await pool.query("UPDATE users SET password_hash = $2 WHERE id = $1", [row.user_id, hashPassword(newPassword)]);
+  await pool.query("DELETE FROM password_resets WHERE user_id = $1", [row.user_id]);
+  await pool.query("DELETE FROM user_sessions WHERE user_id = $1", [row.user_id]); // force re-login everywhere
+  return { ok: true };
 }
 
 // ---------------- authorization ----------------

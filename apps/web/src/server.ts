@@ -84,6 +84,18 @@ app.get<{ Querystring: { token?: string } }>("/api/auth/verify", async (req, rep
   reply.redirect("error" in r ? "/login.html?verify_error=1" : "/login.html?verified=1");
 });
 
+// Password reset (public). Request always returns ok (no account enumeration).
+app.post<{ Body: { email?: string } }>("/api/auth/forgot", async (req, reply) => {
+  try { await Auth.requestPasswordReset(req.body?.email || ""); } catch (err) { app.log.error({ err }, "forgot failed"); }
+  return { ok: true };
+});
+
+app.post<{ Body: { token?: string; password?: string } }>("/api/auth/reset", async (req, reply) => {
+  const r = await Auth.resetPassword(req.body?.token || "", req.body?.password || "");
+  if ("error" in r) { reply.code(400).send(r); return; }
+  return r;
+});
+
 // Re-send the verification email for the signed-in user.
 app.post("/api/auth/resend", async (req, reply) => {
   const user = userOf(req);

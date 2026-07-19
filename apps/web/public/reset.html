@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Reset password · Argus</title>
+  <link rel="stylesheet" href="/app.css">
+  <style>
+    body { min-height: 100vh; display: grid; place-items: center; padding: calc(var(--u)*4); }
+    .auth { width: 100%; max-width: 400px; display: grid; gap: calc(var(--u)*4); }
+    .auth-head { display: flex; align-items: center; gap: 10px; justify-content: center; }
+    .auth-head .brand-name { font-size: 20px; font-weight: 650; }
+    .auth-sub { text-align: center; color: var(--ink-muted); font-size: 13px; margin-top: -8px; }
+    .field { display: grid; gap: 6px; }
+    .field label { font-size: 12px; font-weight: 600; }
+    .field input { font: inherit; font-size: 13.5px; padding: calc(var(--u)*1.7) calc(var(--u)*2.2); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--ink); }
+    .field input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .field .hint { font-size: 11px; color: var(--ink-faint); }
+    form { display: grid; gap: calc(var(--u)*2.6); }
+    .msg { display: none; border-radius: var(--radius); padding: 9px 13px; font-size: 12.5px; }
+    .btn-primary { width: 100%; justify-content: center; }
+  </style>
+</head>
+<body>
+  <div class="auth">
+    <div>
+      <div class="auth-head"><span class="brand-mark" aria-hidden="true"></span><span class="brand-name">Argus</span></div>
+      <p class="auth-sub">Choose a new password</p>
+    </div>
+    <div class="card" style="padding: calc(var(--u)*4);">
+      <div class="msg" id="msg"></div>
+      <form id="resetForm" style="margin-top:calc(var(--u)*1)">
+        <div class="field"><label for="rp-pass">New password</label><input id="rp-pass" type="password" autocomplete="new-password" required><span class="hint">At least 8 characters.</span></div>
+        <div class="field"><label for="rp-pass2">Confirm password</label><input id="rp-pass2" type="password" autocomplete="new-password" required></div>
+        <button class="btn btn-primary" id="resetBtn" type="submit">Set new password</button>
+      </form>
+    </div>
+  </div>
+  <script src="/reset.js"></script>
+</body>
+</html>

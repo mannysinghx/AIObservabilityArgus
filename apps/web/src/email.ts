@@ -64,3 +64,29 @@ export async function sendVerification(to: string, name: string, link: string): 
     console.warn("[email] send failed (non-fatal):", (err as Error).message);
   }
 }
+
+/** Send a password-reset email. Never throws. */
+export async function sendPasswordReset(to: string, name: string, link: string): Promise<void> {
+  const t = transport();
+  if (!t) {
+    console.log(`[email] (not configured) password reset link for ${to}: ${link}`);
+    return;
+  }
+  const hi = name ? `Hi ${name},` : "Hi,";
+  try {
+    await t.sendMail({
+      from: FROM(),
+      to,
+      subject: "Reset your Argus password",
+      text: `${hi}\n\nWe received a request to reset your Argus password. Choose a new one here:\n${link}\n\nThis link expires in 1 hour. If you didn't request this, you can ignore this email — your password won't change.`,
+      html: `<div style="font-family:system-ui,sans-serif;font-size:14px;line-height:1.6;color:#1b2534">
+        <p>${hi}</p>
+        <p>We received a request to reset your Argus password. Choose a new one:</p>
+        <p><a href="${link}" style="display:inline-block;background:#2E9E8F;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:600">Reset password</a></p>
+        <p style="color:#6E8CA8;font-size:12px">Or paste this link: ${link}<br>This link expires in 1 hour. If you didn't request this, you can ignore this email — your password won't change.</p>
+      </div>`,
+    });
+  } catch (err) {
+    console.warn("[email] reset send failed (non-fatal):", (err as Error).message);
+  }
+}

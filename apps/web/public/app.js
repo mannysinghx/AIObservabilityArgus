@@ -625,8 +625,12 @@ $("#inviteBtn")?.addEventListener("click", async () => {
 });
 
 // ---------- auth gate + user menu ----------
+let EMAIL_CONFIGURED = true;
 async function requireAuth() {
-  try { const r = await fetch("/api/auth/me"); if (r.ok) return (await r.json()).user; } catch { /* fall through */ }
+  try {
+    const r = await fetch("/api/auth/me");
+    if (r.ok) { const d = await r.json(); EMAIL_CONFIGURED = d.emailConfigured !== false; return d.user; }
+  } catch { /* fall through */ }
   location.href = "/login.html";
   return null;
 }
@@ -634,7 +638,27 @@ function renderUser(u) {
   const initial = (u.name || u.email || "?").trim().charAt(0).toUpperCase() || "?";
   const btn = $("#userBtn"); if (btn) { btn.textContent = initial; btn.title = u.email; }
   const em = $("#userEmail"); if (em) em.textContent = u.email;
+  if (u.emailVerified === false) showVerifyBanner();
 }
+function showVerifyBanner() {
+  const bar = $("#verifyBanner"), msg = $("#verifyMsg");
+  if (!bar) return;
+  msg.textContent = EMAIL_CONFIGURED
+    ? "Please verify your email address — check your inbox for the confirmation link."
+    : "Email verification is pending — your admin hasn't configured email delivery yet, so no action is needed right now.";
+  bar.style.display = "flex";
+  $("#resendBtn").style.display = EMAIL_CONFIGURED ? "" : "none";
+}
+$("#resendBtn")?.addEventListener("click", async () => {
+  const btn = $("#resendBtn"); btn.disabled = true; btn.textContent = "Sending…";
+  try {
+    const r = await fetch("/api/auth/resend", { method: "POST" });
+    const d = await r.json().catch(() => ({}));
+    $("#verifyMsg").textContent = d.alreadyVerified ? "Your email is already verified." : "Verification email sent — check your inbox.";
+    if (d.alreadyVerified) $("#verifyBanner").style.display = "none";
+  } catch { $("#verifyMsg").textContent = "Couldn't resend right now — try again shortly."; }
+  finally { btn.textContent = "Resend email"; btn.disabled = false; }
+});
 $("#userBtn")?.addEventListener("click", (e) => { e.stopPropagation(); $("#userMenu").classList.toggle("open"); });
 document.addEventListener("click", () => $("#userMenu")?.classList.remove("open"));
 $("#logoutBtn")?.addEventListener("click", async () => {

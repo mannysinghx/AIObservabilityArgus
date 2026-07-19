@@ -5,9 +5,22 @@
 const $ = (s) => document.querySelector(s);
 const errBox = $("#err");
 function showErr(msg) {
+  errBox.style.color = ""; errBox.style.borderColor = ""; errBox.style.background = ""; // reset any success styling
   if (!msg) { errBox.style.display = "none"; return; }
   errBox.style.display = "block";
   errBox.textContent = msg;
+}
+
+// Verification-link outcomes (redirected here from /api/auth/verify).
+const params = new URLSearchParams(location.search);
+if (params.get("verified") === "1") {
+  errBox.style.display = "block";
+  errBox.style.color = "var(--ok)";
+  errBox.style.borderColor = "color-mix(in srgb, var(--ok) 40%, var(--line))";
+  errBox.style.background = "color-mix(in srgb, var(--ok) 8%, transparent)";
+  errBox.textContent = "Your email is verified. Sign in to continue.";
+} else if (params.get("verify_error") === "1") {
+  showErr("That verification link is invalid or has expired. Sign in and resend a new one.");
 }
 
 // If already signed in, skip straight to the dashboard.

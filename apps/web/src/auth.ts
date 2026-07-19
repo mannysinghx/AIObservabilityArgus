@@ -1,5 +1,15 @@
 import { scryptSync, randomBytes, timingSafeEqual } from "node:crypto";
 import { pool, sha256 } from "./db.js";
+import * as Email from "./email.js";
+
+function baseUrl(): string {
+  if (process.env.PUBLIC_URL) return process.env.PUBLIC_URL.replace(/\/$/, "");
+  if (process.env.RAILWAY_PUBLIC_DOMAIN) return "https://" + process.env.RAILWAY_PUBLIC_DOMAIN;
+  return "http://localhost:3002";
+}
+function verificationLink(token: string): string {
+  return `${baseUrl()}/api/auth/verify?token=${encodeURIComponent(token)}`;
+}
 
 // ---------------- password hashing (scrypt, stdlib — no native dep) ----------------
 
@@ -28,6 +38,7 @@ export interface SessionUser {
   id: string;
   email: string;
   name: string;
+  emailVerified: boolean;
 }
 
 export interface AuthError {
@@ -65,10 +76,16 @@ export async function signup(
     }
 
     const isFirst = (await client.query("SELECT 1 FROM users LIMIT 1")).rowCount === 0;
+    const nm = String(name || "").trim().slice(0, 120);
+
+    // The platform operator (first account) is trusted; if no mailer is
+    // configured there's no way to verify, so don't strand anyone — verify
+    // immediately. Otherwise the account starts unverified and gets an email.
+    const verified = isFirst || !Email.configured();
 
     const ins = await client.query<{ id: string }>(
-      "INSERT INTO users (email, name, password_hash) VALUES ($1, $2, $3) RETURNING id",
-      [email, String(name || "").trim().slice(0, 120), hashPassword(password)],
+      "INSERT INTO users (email, name, password_hash, email_verified) VALUES ($1, $2, $3, $4) RETURNING id",
+      [email, nm, hashPassword(password), verified],
     );
     const userId = ins.rows[0].id;
 
@@ -105,9 +122,20 @@ export async function signup(
 
     await activateInvites(client, userId, email); // join any orgs they were invited to
 
+    let verifyLink: string | null = null;
+    if (!verified) {
+      const vtoken = randomBytes(24).toString("base64url");
+      await client.query(
+        "INSERT INTO email_verifications (token_hash, user_id, email, expires_at) VALUES ($1, $2, $3, now() + interval '24 hours')",
+        [sha256(vtoken), userId, email],
+      );
+      verifyLink = verificationLink(vtoken);
+    }
+
     const token = await createSession(client, userId);
     await client.query("COMMIT");
-    return { token, user: { id: userId, email, name: String(name || "").trim() } };
+    if (verifyLink) void Email.sendVerification(email, nm, verifyLink); // fire-and-forget
+    return { token, user: { id: userId, email, name: nm, emailVerified: verified } };
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;
@@ -121,8 +149,8 @@ export async function login(
   password: string,
 ): Promise<{ token: string; user: SessionUser } | AuthError> {
   const email = String(emailRaw || "").trim().toLowerCase();
-  const r = await pool.query<{ id: string; email: string; name: string; password_hash: string }>(
-    "SELECT id, email, name, password_hash FROM users WHERE email = $1",
+  const r = await pool.query<{ id: string; email: string; name: string; password_hash: string; email_verified: boolean }>(
+    "SELECT id, email, name, password_hash, email_verified FROM users WHERE email = $1",
     [email],
   );
   const u = r.rows[0];
@@ -131,7 +159,7 @@ export async function login(
   }
   await activateInvites(pool, u.id, u.email); // pick up invites created since last login
   const token = await createSession(pool, u.id);
-  return { token, user: { id: u.id, email: u.email, name: u.name } };
+  return { token, user: { id: u.id, email: u.email, name: u.name, emailVerified: u.email_verified } };
 }
 
 async function createSession(
@@ -150,17 +178,52 @@ async function createSession(
 /** Resolve the signed-in user from a session token, or null. */
 export async function sessionUser(token: string | undefined): Promise<SessionUser | null> {
   if (!token) return null;
-  const r = await pool.query<{ id: string; email: string; name: string }>(
-    `SELECT u.id, u.email, u.name
+  const r = await pool.query<{ id: string; email: string; name: string; email_verified: boolean }>(
+    `SELECT u.id, u.email, u.name, u.email_verified
      FROM user_sessions s JOIN users u ON u.id = s.user_id
      WHERE s.token_hash = $1 AND s.expires_at > now()`,
     [sha256(token)],
   );
-  return r.rows[0] || null;
+  const u = r.rows[0];
+  return u ? { id: u.id, email: u.email, name: u.name, emailVerified: u.email_verified } : null;
 }
 
 export async function logout(token: string | undefined): Promise<void> {
   if (token) await pool.query("DELETE FROM user_sessions WHERE token_hash = $1", [sha256(token)]);
+}
+
+// ---------------- email verification ----------------
+
+export function emailConfigured(): boolean {
+  return Email.configured();
+}
+
+/** Mark the user behind a valid verification token as verified. */
+export async function verifyEmailToken(token: string): Promise<{ ok: true } | AuthError> {
+  if (!token) return { error: "Invalid link." };
+  const r = await pool.query<{ user_id: string }>(
+    "SELECT user_id FROM email_verifications WHERE token_hash = $1 AND expires_at > now()",
+    [sha256(token)],
+  );
+  const row = r.rows[0];
+  if (!row) return { error: "This verification link is invalid or has expired." };
+  await pool.query("UPDATE users SET email_verified = true WHERE id = $1", [row.user_id]);
+  await pool.query("DELETE FROM email_verifications WHERE user_id = $1", [row.user_id]);
+  return { ok: true };
+}
+
+/** Re-issue a verification email for the signed-in user. */
+export async function resendVerification(userId: string, email: string, name: string): Promise<{ sent: boolean; configured: boolean; alreadyVerified?: boolean }> {
+  const u = await pool.query<{ email_verified: boolean }>("SELECT email_verified FROM users WHERE id = $1", [userId]);
+  if (u.rows[0]?.email_verified) return { sent: false, configured: Email.configured(), alreadyVerified: true };
+  await pool.query("DELETE FROM email_verifications WHERE user_id = $1", [userId]);
+  const vtoken = randomBytes(24).toString("base64url");
+  await pool.query(
+    "INSERT INTO email_verifications (token_hash, user_id, email, expires_at) VALUES ($1, $2, $3, now() + interval '24 hours')",
+    [sha256(vtoken), userId, email],
+  );
+  await Email.sendVerification(email, name, verificationLink(vtoken));
+  return { sent: true, configured: Email.configured() };
 }
 
 // ---------------- authorization ----------------

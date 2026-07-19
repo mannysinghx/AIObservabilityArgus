@@ -33,8 +33,15 @@ app.addHook("preHandler", async (req, reply) => {
   const token = Auth.parseSessionCookie(req.headers.cookie);
   asUser(req).user = await Auth.sessionUser(token);
   if (path.startsWith("/api/auth/")) return; // these manage their own session
-  if (!asUser(req).user) {
+  const u = asUser(req).user;
+  if (!u) {
     reply.code(401).send({ error: "authentication required" });
+    return;
+  }
+  // Optional hard gate: block data access until the email is verified. Off by
+  // default (verification is a nudge); set REQUIRE_EMAIL_VERIFICATION=1 to enforce.
+  if (process.env.REQUIRE_EMAIL_VERIFICATION === "1" && !u.emailVerified) {
+    reply.code(403).send({ error: "email not verified" });
   }
 });
 
@@ -67,7 +74,21 @@ app.post("/api/auth/logout", async (req, reply) => {
 app.get("/api/auth/me", async (req, reply) => {
   const user = userOf(req);
   if (!user) { reply.code(401).send({ error: "not authenticated" }); return; }
-  return { user };
+  return { user, emailConfigured: Auth.emailConfigured() };
+});
+
+// Verification link target (from the email). Public — the token is the credential.
+app.get<{ Querystring: { token?: string } }>("/api/auth/verify", async (req, reply) => {
+  const r = await Auth.verifyEmailToken(req.query.token || "");
+  reply.redirect("error" in r ? "/login.html?verify_error=1" : "/login.html?verified=1");
+});
+
+// Re-send the verification email for the signed-in user.
+app.post("/api/auth/resend", async (req, reply) => {
+  const user = userOf(req);
+  if (!user) { reply.code(401).send({ error: "not authenticated" }); return; }
+  try { return await Auth.resendVerification(user.id, user.email, user.name); }
+  catch (err) { app.log.error({ err }, "resend failed"); reply.code(500).send({ error: "could not resend" }); }
 });
 
 // ---------------- scoped data queries ----------------

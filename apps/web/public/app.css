@@ -93,7 +93,12 @@
     display: flex; flex-direction: column;
     padding: calc(var(--u)*3) 0;
     position: sticky; top: 0; height: 100vh;
+    overflow-y: auto; overscroll-behavior: contain;
+    scrollbar-width: thin; scrollbar-color: var(--line) transparent;
   }
+  .rail::-webkit-scrollbar { width: 8px; }
+  .rail::-webkit-scrollbar-thumb { background: var(--line); border-radius: 8px; }
+  .rail::-webkit-scrollbar-track { background: transparent; }
   .brand {
     display: flex; align-items: center; gap: 10px;
     padding: calc(var(--u)*1.5) calc(var(--u)*4) calc(var(--u)*4);

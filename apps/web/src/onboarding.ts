@@ -85,6 +85,114 @@ export async function createProject(orgName: string, projectName: string): Promi
   }
 }
 
+// ---------------- Multi-tenant catalog ----------------
+// The platform view: every customer (organization) and the applications
+// (projects) under it, each with live KPIs. Tenant-generic — no hard-coded
+// names. Once accounts land (Phase 2), this is filtered to the caller's orgs.
+
+export interface ProjectStat {
+  orgId: string;
+  orgName: string;
+  projectId: string;
+  projectName: string;
+  environment: string;
+  traces: number;
+  tokens: number;
+  cost: number;
+  secEvents: number;
+  maxSev: string;
+  lastSeen: string | null;
+  createdAt: string;
+}
+
+async function chRows<T>(query: string): Promise<T[]> {
+  const rs = await ch().query({ query, format: "JSONEachRow" });
+  return rs.json<T>();
+}
+
+/** Every org + its projects, joined with per-project ClickHouse KPIs. */
+export async function listProjectsWithStats(): Promise<ProjectStat[]> {
+  const { rows: projects } = await pool.query<{
+    project_id: string; project_name: string; org_id: string; org_name: string; created_at: Date;
+  }>(
+    `SELECT p.id AS project_id, p.name AS project_name,
+            p.org_id, o.name AS org_name, p.created_at
+     FROM projects p JOIN organizations o ON o.id = p.org_id
+     ORDER BY o.name, p.created_at`,
+  );
+
+  // Per-project aggregates from ClickHouse (one grouped query per table, merged
+  // by project_id — trace/observation counts don't share a table).
+  const [traceStats, obsStats, secStats] = await Promise.all([
+    chRows<{ project_id: string; traces: string; environment: string; last_seen: string }>(
+      `SELECT project_id, count() AS traces,
+              argMax(environment, timestamp) AS environment,
+              toString(max(timestamp)) AS last_seen
+       FROM traces FINAL GROUP BY project_id`,
+    ),
+    chRows<{ project_id: string; tokens: string; cost: string }>(
+      `SELECT project_id, sum(input_tokens + output_tokens) AS tokens,
+              round(sum(cost_usd), 4) AS cost
+       FROM observations FINAL GROUP BY project_id`,
+    ),
+    chRows<{ project_id: string; sec_events: string; max_sev: string }>(
+      `SELECT project_id, count() AS sec_events, max(severity) AS max_sev
+       FROM security_events FINAL GROUP BY project_id`,
+    ),
+  ]);
+
+  const byId = <T extends { project_id: string }>(rows: T[]) =>
+    new Map(rows.map((r) => [r.project_id, r]));
+  const tMap = byId(traceStats);
+  const oMap = byId(obsStats);
+  const sMap = byId(secStats);
+
+  return projects.map((p) => {
+    const t = tMap.get(p.project_id);
+    const o = oMap.get(p.project_id);
+    const s = sMap.get(p.project_id);
+    return {
+      orgId: p.org_id,
+      orgName: p.org_name,
+      projectId: p.project_id,
+      projectName: p.project_name,
+      environment: t?.environment || "",
+      traces: Number(t?.traces || 0),
+      tokens: Number(o?.tokens || 0),
+      cost: Number(o?.cost || 0),
+      secEvents: Number(s?.sec_events || 0),
+      maxSev: s?.max_sev || "none",
+      lastSeen: t?.last_seen || null,
+      createdAt: p.created_at instanceof Date ? p.created_at.toISOString() : String(p.created_at),
+    };
+  });
+}
+
+export interface ProjectMeta {
+  projectId: string;
+  projectName: string;
+  orgId: string;
+  orgName: string;
+}
+
+/** Resolve one project's human-readable name + owning org, for the header. */
+export async function getProjectMeta(id: string): Promise<ProjectMeta | null> {
+  const safe = String(id || "").replace(/[^a-zA-Z0-9-]/g, "");
+  if (!safe) return null;
+  const { rows } = await pool.query<{
+    project_id: string; project_name: string; org_id: string; org_name: string;
+  }>(
+    `SELECT p.id AS project_id, p.name AS project_name, p.org_id, o.name AS org_name
+     FROM projects p JOIN organizations o ON o.id = p.org_id
+     WHERE p.id = $1`,
+    [safe],
+  );
+  const r = rows[0];
+  return r
+    ? { projectId: r.project_id, projectName: r.project_name, orgId: r.org_id, orgName: r.org_name }
+    : null;
+}
+
 export interface ConnectionStatus {
   projectId: string;
   connected: boolean;

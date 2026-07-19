@@ -8,12 +8,29 @@ let TRACE_BACK = "traces";
 // A self-onboarded client's personalized link carries ?project=<uuid>, which
 // scopes every query to just their data. Absent => default "all projects" view.
 const PROJECT = new URLSearchParams(location.search).get("project") || "";
-if (PROJECT) {
-  document.addEventListener("DOMContentLoaded", () => {
-    const el = document.getElementById("projectLabel");
-    if (el) el.textContent = PROJECT.slice(0, 8) + "…";
-  });
-}
+// Header project chip: show the real application name (not a UUID). When scoped
+// to one app, resolve its name via /api/project/:id; unscoped, it reads
+// "All applications" and links to the catalog.
+document.addEventListener("DOMContentLoaded", async () => {
+  const el = document.getElementById("projectLabel");
+  const ctx = document.getElementById("projectCtx");
+  if (ctx) {
+    ctx.title = PROJECT ? "Click to see all applications" : "All applications";
+    ctx.addEventListener("click", () => {
+      if (PROJECT) { location.href = location.pathname; } // drop scope -> catalog
+      else { show("apps"); load("apps"); }
+    });
+  }
+  if (!PROJECT) { if (el) el.textContent = "All applications"; return; }
+  if (el) el.textContent = PROJECT.slice(0, 8) + "…";
+  try {
+    const m = await (await fetch("/api/project/" + encodeURIComponent(PROJECT))).json();
+    if (el && m && m.projectName) {
+      el.textContent = m.projectName;
+      el.title = (m.orgName ? m.orgName + " · " : "") + PROJECT;
+    }
+  } catch { /* keep the truncated id fallback */ }
+});
 
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -61,13 +78,64 @@ function breakdown(sel, items, isSev) {
 }
 
 // ---------- routing ----------
-const VIEWS = ["overview", "threat", "incidents", "review", "redteam", "traces", "trace", "sessions", "analytics", "prompts", "evals", "appearance", "guide"];
+const VIEWS = ["apps", "overview", "threat", "incidents", "review", "redteam", "traces", "trace", "sessions", "analytics", "prompts", "evals", "appearance", "guide"];
 function show(view) {
   VIEWS.forEach((v) => $(`#view-${v}`).classList.toggle("on", v === view));
   document.querySelectorAll(".nav-item[data-nav]").forEach((b) => b.classList.toggle("active", b.dataset.nav === view));
   window.scrollTo({ top: 0 });
 }
-document.querySelectorAll("[data-nav]").forEach((el) => el.addEventListener("click", () => { const v = el.dataset.nav; show(v); load(v); }));
+document.querySelectorAll("[data-nav]").forEach((el) => el.addEventListener("click", () => {
+  const v = el.dataset.nav;
+  // "Applications" is the cross-project catalog — leaving a scoped view means
+  // dropping ?project= so we see every app again.
+  if (v === "apps" && PROJECT) { location.href = location.pathname; return; }
+  show(v); load(v);
+}));
+
+// ---------- Applications catalog (customers -> their apps) ----------
+async function loadApps() {
+  try {
+    const rows = await (await fetch("/api/projects")).json(); banner("");
+    if (!Array.isArray(rows) || !rows.length) {
+      $("#appsSub").textContent = "no applications yet";
+      $("#appsCatalog").innerHTML = '<div class="card"><div class="empty" style="padding:calc(var(--u)*4)"><div class="big">No applications connected yet</div><a href="/onboard.html" style="color:var(--accent)">Connect your first app →</a></div></div>';
+      return;
+    }
+    const byOrg = new Map();
+    rows.forEach((r) => { if (!byOrg.has(r.orgName)) byOrg.set(r.orgName, []); byOrg.get(r.orgName).push(r); });
+    $("#appsSub").textContent = `${rows.length} application${rows.length > 1 ? "s" : ""} across ${byOrg.size} customer${byOrg.size > 1 ? "s" : ""}`;
+    $("#appsCatalog").innerHTML = [...byOrg.entries()].map(([org, apps]) => `
+      <div>
+        <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px">
+          <span style="font-weight:650;font-size:14px">${esc(org)}</span>
+          <span class="dim" style="font-size:12px">${apps.length} app${apps.length > 1 ? "s" : ""}</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px">
+          ${apps.map(appCard).join("")}
+        </div>
+      </div>`).join("");
+    stamp();
+  } catch (e) { banner("Applications query failed: " + e.message); }
+}
+function appCard(a) {
+  const sec = Number(a.secEvents) > 0
+    ? pill(sevName(a.maxSev)) + ` <span class="dim">${num(a.secEvents)} event${Number(a.secEvents) > 1 ? "s" : ""}</span>`
+    : '<span class="dim">no security events</span>';
+  const activity = a.lastSeen ? "active " + ago(a.lastSeen) : "no traffic yet";
+  return `<a class="card clickable" href="/?project=${encodeURIComponent(a.projectId)}" style="text-decoration:none;color:inherit;display:block;padding:calc(var(--u)*2.6)">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
+      <span style="font-weight:650;font-size:15px">${esc(a.projectName)}</span>
+      ${a.environment ? `<span class="pill pill-neutral">${esc(a.environment)}</span>` : ""}
+    </div>
+    <div class="dim mono" style="font-size:10.5px;margin:3px 0 12px">${esc(String(a.projectId).slice(0, 13))}… · ${activity}</div>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px">
+      <span><b>${num(a.traces)}</b> <span class="dim">traces</span></span>
+      <span><b>${num(a.tokens)}</b> <span class="dim">tokens</span></span>
+      <span><b>${money(a.cost)}</b></span>
+    </div>
+    <div style="margin-top:8px;font-size:12px">${sec}</div>
+  </a>`;
+}
 
 // ---------- User Guide: table-of-contents scrolling ----------
 document.querySelectorAll("[data-scroll]").forEach((el) => el.addEventListener("click", () => {
@@ -430,7 +498,7 @@ $("#refreshBtn").addEventListener("click", () => load(document.querySelector(".n
 
 // ---------- loader dispatch ----------
 function load(view) {
-  ({ overview: loadOverview, threat: loadThreat, incidents: loadIncidents, review: loadReview, traces: loadTraces, sessions: loadSessions, analytics: loadAnalytics, evals: loadEvals }[view] || (() => {}))();
+  ({ apps: loadApps, overview: loadOverview, threat: loadThreat, incidents: loadIncidents, review: loadReview, traces: loadTraces, sessions: loadSessions, analytics: loadAnalytics, evals: loadEvals }[view] || (() => {}))();
 }
 
 // ---------- deep link from onboarding: ?guide=onboarding opens the User
@@ -443,6 +511,10 @@ if (GUIDE_DEEP_LINK === "onboarding") {
   const target = document.getElementById("g-onboarding");
   if (target) target.scrollIntoView({ behavior: "instant", block: "start" });
   document.querySelectorAll(".guide-toc .toc-link").forEach((b) => b.classList.toggle("active", b.dataset.scroll === "g-onboarding"));
+} else if (!PROJECT) {
+  // Unscoped (operator) entry lands on the Applications catalog; a customer's
+  // personalized ?project= link lands on that app's Overview.
+  show("apps"); load("apps");
 } else {
   loadOverview();
 }

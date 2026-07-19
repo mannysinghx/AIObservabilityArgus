@@ -43,6 +43,21 @@ guard("traces", (r, p) => Q.tracesList(r, 100, p));
 guard("analytics", (r, p) => Q.analytics(r, p));
 guard("prompts", () => Q.prompts());
 
+// Multi-tenant catalog: all customers (orgs) + their applications (projects)
+// with live KPIs, and single-project name resolution for the header.
+app.get("/api/projects", async (_req, reply) => {
+  try { return await Onboarding.listProjectsWithStats(); }
+  catch (err) { app.log.error({ err }, "projects failed"); reply.code(503).send({ error: "query failed", detail: String(err) }); }
+});
+
+app.get<{ Params: { id: string } }>("/api/project/:id", async (req, reply) => {
+  try {
+    const meta = await Onboarding.getProjectMeta(req.params.id);
+    if (!meta) { reply.code(404).send({ error: "project not found" }); return; }
+    return meta;
+  } catch (err) { app.log.error({ err }, "project meta failed"); reply.code(503).send({ error: String(err) }); }
+});
+
 app.get<{ Params: { id: string }; Querystring: ScopedQuery }>("/api/trace/:id", async (req, reply) => {
   try { return await Q.traceDetail(req.params.id, req.query.project); }
   catch (err) { app.log.error({ err }, "trace failed"); reply.code(503).send({ error: String(err) }); }

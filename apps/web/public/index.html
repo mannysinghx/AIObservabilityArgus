@@ -82,6 +82,7 @@
       <div><div class="brand-name">Argus</div><div class="brand-env" id="envLabel">live</div></div>
     </div>
     <div class="nav-group">
+      <button class="nav-item" type="button" data-nav="apps"><span class="nav-ico">▦</span>Applications</button>
       <button class="nav-item active" type="button" data-nav="overview"><span class="nav-ico">◧</span>Overview</button>
     </div>
     <div class="nav-group">
@@ -130,6 +131,12 @@
     <div class="status-banner" id="statusBanner"></div>
 
     <main class="content">
+      <!-- APPLICATIONS (multi-tenant catalog: customers -> their apps) -->
+      <section class="view" id="view-apps">
+        <div class="page-head"><h1 class="page-title">Applications</h1><span class="page-sub"><span class="live-dot"></span><span id="appsSub">loading…</span></span></div>
+        <div id="appsCatalog" class="stack" style="gap:calc(var(--u)*5)"></div>
+      </section>
+
       <!-- OVERVIEW -->
       <section class="view on" id="view-overview">
         <div class="page-head"><h1 class="page-title">Overview</h1><span class="page-sub"><span class="live-dot"></span><span id="ovSub">loading…</span></span></div>

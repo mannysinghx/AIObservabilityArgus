@@ -79,6 +79,48 @@ const outcomePill = (o) => `<span class="pill pill-${o === "succeeded" ? "critic
 const verdictTag = (v) => `<span class="verdict-tag verdict-${esc(v)}"${tipAttr(VERDICT_INFO[v])}>${esc(titleCase(v))}</span>`;
 const dur = (ms) => (ms >= 1000 ? (ms / 1000).toFixed(2) + " s" : Math.round(ms) + " ms");
 
+// ---------- glossary fallback ----------
+// app.js renders with helpers from glossary.js. If that file is missing, stale,
+// or blocked (a partial deploy, a CDN serving a mismatched pair, a failed asset
+// fetch), a bare reference would throw ReferenceError on EVERY render and take
+// the whole dashboard down. These no-op stubs make the plain-English layer
+// degrade to the pre-glossary UI instead: labels still render, tooltips and
+// explainers simply don't appear.
+//
+// `typeof` is safe on an undeclared identifier, and glossary.js's top-level
+// `const`s live in the global lexical scope — so when it HAS loaded these
+// checks see it and nothing is overwritten.
+(function glossaryFallback() {
+  const g = globalThis;
+  const plain = (s) => String(s ?? "").replace(/_/g, " ");
+  if (typeof tipAttr === "undefined") g.tipAttr = () => "";
+  if (typeof catLabel === "undefined") g.catLabel = plain;
+  if (typeof catTip === "undefined") g.catTip = () => "";
+  if (typeof catChip === "undefined") {
+    g.catChip = (c, cls = "cat") => `<span class="${cls}">${esc(plain(c))}</span>`;
+  }
+  if (typeof ruleTip === "undefined") g.ruleTip = () => "";
+  if (typeof signalTip === "undefined") g.signalTip = () => "";
+  if (typeof anyTip === "undefined") g.anyTip = () => "";
+  if (typeof explainBlock === "undefined") g.explainBlock = () => "";
+  if (typeof scoreBlock === "undefined") {
+    g.scoreBlock = (n) => `<div class="scorebar"><span class="scorebar-val">${esc(String(n ?? 0))}</span><span class="scorebar-scale">/100</span></div>`;
+  }
+  // Lookup tables: an empty object yields no tooltip, which is exactly the
+  // pre-glossary behaviour.
+  if (typeof SEVERITY_INFO === "undefined") g.SEVERITY_INFO = {};
+  if (typeof OUTCOME_INFO === "undefined") g.OUTCOME_INFO = {};
+  if (typeof VERDICT_INFO === "undefined") g.VERDICT_INFO = {};
+  if (typeof LAYER_INFO === "undefined") g.LAYER_INFO = {};
+  if (typeof METRIC_INFO === "undefined") g.METRIC_INFO = {};
+  if (typeof TAINT_INFO === "undefined") g.TAINT_INFO = {};
+  if (typeof BREAKDOWN_INFO === "undefined") g.BREAKDOWN_INFO = {};
+
+  if (typeof CATEGORY_INFO === "undefined") {
+    console.warn("Argus: /glossary.js did not load — plain-English tooltips and explainers are disabled, but the dashboard is otherwise fine.");
+  }
+})();
+
 async function api(path) {
   const params = new URLSearchParams();
   if (RANGE) params.set("range", RANGE);

@@ -1,6 +1,9 @@
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import Fastify from "fastify";
+import type { FastifyReply } from "fastify";
 import fastifyStatic from "@fastify/static";
 import { config } from "@argus/shared";
 import * as Q from "./queries.js";
@@ -14,7 +17,58 @@ const PUBLIC_DIR = join(__dirname, "..", "public");
 const port = Number(process.env.PORT ?? process.env.WEB_PORT ?? 3002);
 
 const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? "info" } });
-await app.register(fastifyStatic, { root: PUBLIC_DIR, prefix: "/" });
+
+// ---------------------------------------------------------------- asset versioning
+// The dashboard is several cooperating files (app.js needs glossary.js; both
+// need app.css). If a browser or CDN caches one and revalidates another, it can
+// serve a mismatched pair — which used to mean a broken page. So: hash the
+// asset bundle once at boot, stamp that version into every HTML asset URL, and
+// serve the HTML itself as no-cache. The HTML is always fresh and cheap; the
+// assets are immutable per version and can be cached hard. A deploy changes the
+// hash, so every client picks up the whole new set atomically.
+const VERSIONED_ASSETS = ["app.js", "app.css", "glossary.js", "login.js", "onboard.js", "reset.js"];
+const HTML_PAGES = ["index.html", "login.html", "onboard.html", "reset.html"];
+
+// Hash names and raw bytes in a plain loop. Buffers go in as Buffers (no utf8
+// round-trip) and the filename is folded in, so a rename or a missing file
+// changes the version too. Deliberately boring: this value decides whether a
+// browser picks up a deploy, so it should be obvious rather than clever.
+function computeAssetVersion(): string {
+  const h = createHash("sha1");
+  for (const f of VERSIONED_ASSETS) {
+    h.update(f);
+    try { h.update(readFileSync(join(PUBLIC_DIR, f))); } catch { h.update("<missing>"); }
+  }
+  return h.digest("hex").slice(0, 10);
+}
+const ASSET_VERSION = computeAssetVersion();
+
+// Rendered once at boot — these files never change while the process is alive.
+const renderedHtml = new Map<string, string>();
+for (const page of HTML_PAGES) {
+  try {
+    renderedHtml.set(page, readFileSync(join(PUBLIC_DIR, page), "utf8").replaceAll("__ASSETV__", ASSET_VERSION));
+  } catch { /* page absent in this build — fall through to static */ }
+}
+function sendHtml(page: string, reply: FastifyReply): FastifyReply | undefined {
+  const body = renderedHtml.get(page);
+  if (body === undefined) return undefined; // let @fastify/static handle it
+  return reply
+    .header("content-type", "text/html; charset=utf-8")
+    // Must revalidate: this is what guarantees a redeploy is picked up.
+    .header("cache-control", "no-cache")
+    .send(body);
+}
+
+// Explicit HTML routes are registered before the static wildcard so they win.
+app.get("/", async (_req, reply) => sendHtml("index.html", reply) ?? reply.callNotFound());
+for (const page of HTML_PAGES) {
+  app.get(`/${page}`, async (_req, reply) => sendHtml(page, reply) ?? reply.callNotFound());
+}
+
+// `index: false` — "/" is served by the route above, not by static's own index.
+await app.register(fastifyStatic, { root: PUBLIC_DIR, prefix: "/", index: false });
+app.log.info({ assetVersion: ASSET_VERSION }, "static assets versioned");
 
 type ScopedQuery = { range?: string; project?: string };
 type WithUser = { user: Auth.SessionUser | null };
@@ -28,7 +82,10 @@ function audit(req: unknown, action: string, opts: Partial<Audit.RecordOpts> = {
   void Audit.record(action, { actor: u?.id, actorEmail: u?.email, ip, ...opts });
 }
 
-app.get("/health", async () => ({ status: (await Q.health()) ? "ok" : "degraded", service: "argus-web" }));
+// `assetVersion` is the deploy fingerprint: curl /health and compare it against
+// the ?v= in the page source to tell "my browser is stale" apart from "the
+// server never picked up my deploy".
+app.get("/health", async () => ({ status: (await Q.health()) ? "ok" : "degraded", service: "argus-web", assetVersion: ASSET_VERSION }));
 
 // ---------------- auth gate ----------------
 // Resolve the signed-in user for every /api/* request from the session cookie,

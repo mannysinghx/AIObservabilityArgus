@@ -6,12 +6,15 @@ import sys
 import threading
 from dataclasses import dataclass, field
 
-_DEFAULT_INGEST = "http://localhost:3001/api/public/ingestion"
+# Hosted Argus ingest endpoint. Baked in so a customer never configures a URL —
+# self-hosters override with ingest_url / ARGUS_INGEST_URL.
+_DEFAULT_INGEST = "https://argusingest-production.up.railway.app/api/public/ingestion"
 
 
 @dataclass
 class Config:
-    public_key: str = ""
+    key: str = ""          # single write-only ingest key ("ak_live_…")
+    public_key: str = ""   # legacy pair
     secret_key: str = ""
     ingest_url: str = _DEFAULT_INGEST
     environment: str = "production"
@@ -23,7 +26,7 @@ class Config:
 
     @property
     def enabled(self) -> bool:
-        return bool(self.public_key and self.secret_key)
+        return bool(self.key or (self.public_key and self.secret_key))
 
 
 _state: Config | None = None
@@ -34,10 +37,12 @@ _warned: set[str] = set()
 def resolve(**opts) -> Config:
     env = os.environ
     return Config(
+        key=opts.get("key") or env.get("ARGUS_KEY", ""),
         public_key=opts.get("public_key") or env.get("ARGUS_PUBLIC_KEY", ""),
         secret_key=opts.get("secret_key") or env.get("ARGUS_SECRET_KEY", ""),
         ingest_url=opts.get("ingest_url") or env.get("ARGUS_INGEST_URL", _DEFAULT_INGEST),
-        environment=opts.get("environment") or env.get("ARGUS_ENV", "production"),
+        # Auto-detect the environment tag so it isn't one more thing to configure.
+        environment=opts.get("environment") or env.get("ARGUS_ENV") or env.get("APP_ENV") or "production",
         flush_interval=float(opts.get("flush_interval", 2.0)),
         max_batch=int(opts.get("max_batch", 100)),
         instrument_openai=opts.get("instrument_openai", True),

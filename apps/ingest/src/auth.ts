@@ -47,6 +47,39 @@ export async function authenticate(
   return project;
 }
 
+/**
+ * Single-value ingest key: `Authorization: Bearer ak_live_…`. This is the
+ * zero-config path — the customer pastes one token into init(), no env vars.
+ * The token is write-only and scoped to one project, so it can only add
+ * telemetry; it can't read data or manage anything.
+ */
+export async function authenticateToken(token: string): Promise<AuthedProject | null> {
+  const hash = sha256(token);
+  const cacheKey = `tok:${hash}`;
+  const hit = cache.get(cacheKey);
+  if (hit && hit.expires > Date.now()) return hit.project;
+
+  const res = await pool.query(
+    `SELECT project_id, public_key FROM api_keys WHERE token_hash = $1 LIMIT 1`,
+    [hash],
+  );
+  if (res.rowCount === 0) return null;
+  const row = res.rows[0];
+
+  const project: AuthedProject = { projectId: row.project_id, publicKey: row.public_key };
+  cache.set(cacheKey, { project, expires: Date.now() + TTL_MS });
+  pool
+    .query(`UPDATE api_keys SET last_used_at = now() WHERE token_hash = $1`, [hash])
+    .catch(() => {});
+  return project;
+}
+
+export function parseBearer(header?: string): string | null {
+  if (!header?.startsWith("Bearer ")) return null;
+  const t = header.slice(7).trim();
+  return t || null;
+}
+
 export function parseBasicAuth(header?: string): { user: string; pass: string } | null {
   if (!header?.startsWith("Basic ")) return null;
   try {

@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # ---- fake ingest endpoint ----
-RECEIVED = {"traces": [], "observations": []}
+RECEIVED = {"traces": [], "observations": [], "auth": None}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -26,6 +26,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         n = int(self.headers.get("content-length", 0))
+        RECEIVED["auth"] = self.headers.get("authorization")
         body = self.rfile.read(n)
         try:
             b = json.loads(body)
@@ -118,6 +119,7 @@ def check(name, fn):
 def reset():
     RECEIVED["traces"].clear()
     RECEIVED["observations"].clear()
+    RECEIVED["auth"] = None
 
 
 def main():
@@ -251,6 +253,27 @@ def main():
         assert isinstance(g["attributes"], dict)
 
     check("observation matches the Argus IngestBatch field shape", t_shape)
+
+    def t_token():
+        reset()
+        # Re-init the way a customer would: one key, no env vars, no URL.
+        argus.init("ak_live_PYTOKEN123", ingest_url=ingest_url, flush_interval=0.1)
+        oc = AsyncCompletions()
+        asyncio.run(oc.create(model="gpt-4o-mini", messages=[{"role": "user", "content": "x"}]))
+        assert wait_for(lambda: any(o["type"] == "generation" for o in RECEIVED["observations"])), "no generation on token path"
+        assert RECEIVED["auth"] == "Bearer ak_live_PYTOKEN123", RECEIVED["auth"]
+
+    check('zero-config: init("ak_live_…") sends Bearer auth', t_token)
+
+    def t_legacy_pair():
+        reset()
+        argus.init(public_key="pk", secret_key="sk", ingest_url=ingest_url, flush_interval=0.1)
+        oc = AsyncCompletions()
+        asyncio.run(oc.create(model="gpt-4o-mini", messages=[{"role": "user", "content": "x"}]))
+        assert wait_for(lambda: any(o["type"] == "generation" for o in RECEIVED["observations"])), "no generation on pair path"
+        assert str(RECEIVED["auth"]).startswith("Basic "), RECEIVED["auth"]
+
+    check("legacy public/secret pair still sends Basic auth", t_legacy_pair)
 
     argus.flush()
     srv.shutdown()

@@ -10,7 +10,7 @@ import {
   type ObservationInput,
   type TraceInput,
 } from "@argus/shared";
-import { authenticate, parseBasicAuth } from "./auth.js";
+import { authenticate, authenticateToken, parseBasicAuth, parseBearer } from "./auth.js";
 
 const app = Fastify({
   logger: { level: process.env.LOG_LEVEL ?? "info" },
@@ -43,14 +43,22 @@ async function pushEvents(projectId: string, batch: IngestBatch): Promise<number
 app.decorateRequest("projectId", "");
 app.addHook("preHandler", async (req, reply) => {
   if (req.url === "/health") return;
-  const basic = parseBasicAuth(req.headers.authorization);
-  if (!basic) {
-    reply.code(401).send({ error: "missing Basic auth (publicKey:secret)" });
-    return;
+  const header = req.headers.authorization;
+
+  // Preferred: a single write-only ingest key — `Authorization: Bearer ak_live_…`.
+  // Fallback: the original publicKey:secret Basic auth, so existing
+  // integrations keep working unchanged.
+  let project = null;
+  const token = parseBearer(header);
+  if (token) {
+    project = await authenticateToken(token);
+  } else {
+    const basic = parseBasicAuth(header);
+    if (basic) project = await authenticate(basic.user, basic.pass);
   }
-  const project = await authenticate(basic.user, basic.pass);
+
   if (!project) {
-    reply.code(401).send({ error: "invalid credentials" });
+    reply.code(401).send({ error: "invalid or missing credentials — send 'Authorization: Bearer <ingest key>'" });
     return;
   }
   (req as unknown as { projectId: string }).projectId = project.projectId;

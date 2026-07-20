@@ -2,6 +2,11 @@ import { randomBytes } from "node:crypto";
 import { ch } from "@argus/shared";
 import { pool, sha256 } from "./db.js";
 
+/** Single write-only ingest key — the zero-config credential pasted into init(). */
+function genToken(): string {
+  return `ak_live_${randomBytes(24).toString("base64url")}`;
+}
+
 function genKey(prefix: string): string {
   return `${prefix}-${randomBytes(18).toString("base64url")}`;
 }
@@ -10,6 +15,7 @@ export interface NewProject {
   orgId: string;
   projectId: string;
   projectName: string;
+  token: string;     // ak_live_… — the one value a customer needs; returned ONCE
   publicKey: string;
   secretKey: string; // plaintext — this is the ONLY time it's ever returned
 }
@@ -54,9 +60,10 @@ export async function createProject(
 
     const publicKey = genKey("pk");
     const secretKey = genKey("sk");
+    const token = genToken();
     await client.query(
-      `INSERT INTO api_keys (project_id, public_key, secret_hash, scopes) VALUES ($1, $2, $3, $4)`,
-      [projectId, publicKey, sha256(secretKey), ["ingest"]],
+      `INSERT INTO api_keys (project_id, public_key, secret_hash, scopes, token_hash) VALUES ($1, $2, $3, $4, $5)`,
+      [projectId, publicKey, sha256(secretKey), ["ingest"], sha256(token)],
     );
 
     // A permissive default detection config so scanning works immediately —
@@ -80,7 +87,7 @@ export async function createProject(
     );
 
     await client.query("COMMIT");
-    return { orgId: targetOrg, projectId, projectName: projectName.trim(), publicKey, secretKey };
+    return { orgId: targetOrg, projectId, projectName: projectName.trim(), token, publicKey, secretKey };
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;
@@ -203,16 +210,17 @@ export async function listKeys(projectId: string): Promise<ApiKeyRow[]> {
   }));
 }
 
-/** Mint a new API key pair for a project. The secret is returned ONCE. */
-export async function createKey(projectId: string): Promise<{ id: string; publicKey: string; secretKey: string }> {
+/** Mint a new key for a project. The token/secret are returned ONCE. */
+export async function createKey(projectId: string): Promise<{ id: string; token: string; publicKey: string; secretKey: string }> {
   const safe = String(projectId || "").replace(/[^a-zA-Z0-9-]/g, "");
   const publicKey = genKey("pk");
   const secretKey = genKey("sk");
+  const token = genToken();
   const { rows } = await pool.query<{ id: string }>(
-    `INSERT INTO api_keys (project_id, public_key, secret_hash, scopes) VALUES ($1, $2, $3, $4) RETURNING id`,
-    [safe, publicKey, sha256(secretKey), ["ingest"]],
+    `INSERT INTO api_keys (project_id, public_key, secret_hash, scopes, token_hash) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+    [safe, publicKey, sha256(secretKey), ["ingest"], sha256(token)],
   );
-  return { id: rows[0].id, publicKey, secretKey };
+  return { id: rows[0].id, token, publicKey, secretKey };
 }
 
 /** Revoke a key. Refuses to remove the last key so a project can't be orphaned. */

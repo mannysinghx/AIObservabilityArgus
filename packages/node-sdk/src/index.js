@@ -25,9 +25,15 @@ const VERSION = "0.1.0";
 let initialized = false;
 
 /**
- * Initialize the SDK. Idempotent — safe to call more than once. Options fall
- * back to ARGUS_PUBLIC_KEY / ARGUS_SECRET_KEY / ARGUS_INGEST_URL, so in most
- * deployments this needs no arguments. Returns the API for one-line chaining.
+ * Initialize the SDK. Idempotent — safe to call more than once.
+ *
+ *   init("ak_live_…")          // zero config: just the ingest key
+ *   init({ key: "ak_live_…" }) // same, with options
+ *   init()                     // reads ARGUS_KEY (or the legacy
+ *                              // ARGUS_PUBLIC_KEY/ARGUS_SECRET_KEY pair)
+ *
+ * The hosted ingest endpoint is built in, so no URL is needed. Returns the API
+ * for one-line chaining.
  */
 function init(opts = {}) {
   const cfg = resolveConfig(opts);
@@ -36,8 +42,8 @@ function init(opts = {}) {
   if (!cfg.enabled) {
     warnOnce(
       "no-keys",
-      "ARGUS_PUBLIC_KEY / ARGUS_SECRET_KEY not set — tracing is disabled, no data will be sent. " +
-        "Set both to start capturing.",
+      'no ingest key — tracing is disabled, no data will be sent. Pass one: init("ak_live_…") ' +
+        "or set ARGUS_KEY.",
     );
   }
 

@@ -20,16 +20,26 @@ __version__ = "0.1.0"
 _initialized = False
 
 
-def init(**opts):
-    """Initialize the tracer. Reads ARGUS_PUBLIC_KEY / ARGUS_SECRET_KEY /
-    ARGUS_INGEST_URL / ARGUS_ENV from the environment; kwargs override. Idempotent."""
+def init(key: str | None = None, **opts):
+    """Initialize the tracer. Idempotent.
+
+        argus.init("ak_live_…")      # zero config: just the ingest key
+        argus.init(key="ak_live_…")  # same
+        argus.init()                 # reads ARGUS_KEY (or the legacy
+                                     # ARGUS_PUBLIC_KEY/ARGUS_SECRET_KEY pair)
+
+    The hosted ingest endpoint is built in, so no URL is needed.
+    """
     global _initialized
+    if key:
+        opts["key"] = key
     cfg = _config.resolve(**opts)
     _config.set_config(cfg)
     if not cfg.enabled:
         _config.warn_once(
             "no-keys",
-            "ARGUS_PUBLIC_KEY / ARGUS_SECRET_KEY not set — tracing is disabled, no data will be sent.",
+            'no ingest key — tracing is disabled, no data will be sent. '
+            'Pass one: argus.init("ak_live_…") or set ARGUS_KEY.',
         )
     if not _initialized:
         _instrument.install(cfg)

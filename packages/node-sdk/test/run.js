@@ -24,13 +24,14 @@ function check(name, fn) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ---------- fake ingestion server: records every batch it receives ----------
-const received = { traces: [], observations: [] };
+const received = { traces: [], observations: [], auth: null };
 function startIngest() {
   return new Promise((resolve) => {
     const srv = http.createServer((req, res) => {
       let body = "";
       req.on("data", (c) => (body += c));
       req.on("end", () => {
+        received.auth = req.headers.authorization || null;
         try {
           const batch = JSON.parse(body || "{}");
           for (const t of batch.traces || []) received.traces.push(t);
@@ -291,6 +292,28 @@ async function main() {
     await settle();
     assert.strictEqual(received.traces.length, 0, "emitted an empty trace summary");
     assert.strictEqual(received.observations.length, 0, "emitted stray observations");
+  });
+
+  await check('zero-config: init("ak_live_…") sends Bearer auth', async () => {
+    reset();
+    const cfgMod = require("../src/config");
+    const saved = cfgMod.getConfig();
+    // Re-init the way a customer would: one key, no env vars, no URL.
+    argus.init({ key: "ak_live_TESTTOKEN123", ingestUrl, flushIntervalMs: 50 });
+    await chat();
+    await settle();
+    assert.strictEqual(received.auth, "Bearer ak_live_TESTTOKEN123", `got ${received.auth}`);
+    const gen = received.observations.find((o) => o.type === "generation");
+    assert.ok(gen, "no generation captured on the token path");
+    assert.strictEqual(gen.output, "Hello there");
+    cfgMod.setConfig(saved); // restore the pair-based config for later tests
+  });
+
+  await check("legacy public/secret pair still sends Basic auth", async () => {
+    reset();
+    await chat();
+    await settle();
+    assert.ok(String(received.auth || "").startsWith("Basic "), `expected Basic, got ${received.auth}`);
   });
 
   await check("does not send anything when keys are absent", async () => {

@@ -47,6 +47,7 @@ $("#createBtn").addEventListener("click", async () => {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
     project = data;
+    $("#tokenOut").textContent = project.token;
     $("#pubKeyOut").textContent = project.publicKey;
     $("#secKeyOut").textContent = project.secretKey;
     showStep(2);
@@ -54,7 +55,7 @@ $("#createBtn").addEventListener("click", async () => {
     showError("Couldn't create your project: " + e.message);
   } finally {
     btn.disabled = false;
-    btn.textContent = "Create Project & Get API Key";
+    btn.textContent = "Create Application & Get API Key";
   }
 });
 
@@ -87,25 +88,39 @@ function flashCopied(btn) {
 // throwaway connectivity check for people who want to see the key light up
 // before touching their app.
 
-// Pre-filled environment block, shared by every SDK tab.
-function envBlock() {
-  return `ARGUS_PUBLIC_KEY=${project.publicKey}
-ARGUS_SECRET_KEY=${project.secretKey}
-ARGUS_INGEST_URL=${project.ingestUrl}`;
-}
+// The ingest key is embedded directly in the snippet — no environment variables,
+// no URL to configure. It's write-only and scoped to this one application, so it
+// can only add telemetry (it can't read your data or change anything), and you
+// can rotate it any time from API Keys.
+const KEY = () => project.token;
 
-const EXPRESS_CODE = `// 1) At the very top of your entry file (app.js / server.js),
+function expressCode() {
+  return `// 1) At the very top of your entry file (app.js / server.js),
 //    before you create any LLM clients:
-const argus = require("@argus/node").init();
+const argus = require("@argus/node").init("${KEY()}");
 
 // 2) Right after you create your Express app:
 app.use(argus.middleware());
 
 // Done. Every OpenAI / Anthropic / OpenAI-compatible call in a
 // request is now captured and grouped into one trace — no per-call code.`;
+}
 
-const NEXT_CODE = `// lib/argus.js — import once so init() runs at startup
-const argus = require("@argus/node").init();
+function pythonCode() {
+  return `# 1) At startup (e.g. main.py), before you create any LLM clients:
+import argus
+argus.init("${KEY()}")
+
+# 2) On your FastAPI app:
+app.add_middleware(argus.Middleware)
+
+# Done. Every OpenAI / Anthropic call in a request is captured
+# and grouped into one trace — no per-call code.`;
+}
+
+function nextCode() {
+  return `// lib/argus.js — import once so init() runs at startup
+const argus = require("@argus/node").init("${KEY()}");
 module.exports = argus;
 
 // In each route handler, wrap the work and flush before returning
@@ -119,15 +134,18 @@ export async function POST(req) {
     return Response.json(result);
   });
 }`;
+}
 
-const NODE_CODE = `// At startup, before creating LLM clients:
-const argus = require("@argus/node").init();
+function nodeCode() {
+  return `// At startup, before creating LLM clients:
+const argus = require("@argus/node").init("${KEY()}");
 
 // Wrap each job / request so its LLM calls group into one trace:
 await argus.trace("summarize-job", async () => {
   // ...your existing code — LLM calls here are captured automatically
 });
 // (A standalone call outside any trace() is still captured — one trace each.)`;
+}
 
 // Throwaway connectivity check. Trace/observation IDs are unique per project
 // (suffixed with a slice of the project's UUID), never a shared literal — two
@@ -137,7 +155,7 @@ function curlSnippet() {
   const ts = new Date().toISOString();
   const suffix = project.projectId.replace(/-/g, "").slice(0, 10);
   return `curl -X POST '${project.ingestUrl}' \\
-  -u '${project.publicKey}:${project.secretKey}' \\
+  -H 'authorization: Bearer ${KEY()}' \\
   -H 'content-type: application/json' \\
   -d '{
     "traces": [{ "traceId": "tr_hello_${suffix}", "name": "smoke-test", "timestamp": "${ts}" }],
@@ -152,43 +170,46 @@ function curlSnippet() {
 
 const TABS = {
   express: {
-    env: true,
     install: "npm install @argus/node",
-    codeLabel: "Add two lines to your app",
-    code: () => EXPRESS_CODE,
+    codeLabel: "Add two lines to your app — your key is already in it",
+    code: expressCode,
     howto: [
       "In a terminal, in your app's project folder, run the install command below.",
-      "Put your keys where your app reads config — a <code>.env</code> file locally, or your host's environment-variable settings (Railway, Vercel, Azure, AWS…). They're pre-filled below.",
-      "Add the two lines of code below: the <code>init()</code> line at the very top of your entry file, the <code>middleware()</code> line right after you create your Express app.",
+      "Copy the two lines below into your app: the <code>init()</code> line at the very top of your entry file, the <code>middleware()</code> line right after you create your Express app. <b>No environment variables needed</b> — your key is in the snippet.",
       "Deploy the way you always do (<code>git push</code> / your platform's deploy / a restart), then use your app once for real — watch the status below flip to <b>Connected</b>.",
     ],
   },
-  next: {
-    env: true,
-    install: "npm install @argus/node",
-    codeLabel: "Wire it into your route handlers",
-    code: () => NEXT_CODE,
+  python: {
+    install: "pip install argus-tracer",
+    codeLabel: "Add two lines to your app — your key is already in it",
+    code: pythonCode,
     howto: [
       "In your project folder, run the install command below.",
-      "Add your keys to your host's <b>Production</b> environment variables (pre-filled below). On Vercel, <b>redeploy after adding them</b> — new vars only apply to a fresh deploy.",
+      "Copy the two lines below: <code>argus.init(...)</code> at startup, and the middleware on your FastAPI app. <b>No environment variables needed</b> — your key is in the snippet.",
+      "Deploy or restart, then use your app once for real — watch the status below flip to <b>Connected</b>.",
+    ],
+  },
+  next: {
+    install: "npm install @argus/node",
+    codeLabel: "Wire it into your route handlers",
+    code: nextCode,
+    howto: [
+      "In your project folder, run the install command below.",
       "Add the <code>init()</code> line once at startup, then wrap each route handler as shown. Keep the <code>argus.flush()</code> before you return — serverless functions can freeze the moment they respond.",
       "Deploy, trigger a real request, and watch the status below.",
     ],
   },
   node: {
-    env: true,
     install: "npm install @argus/node",
     codeLabel: "Initialize and wrap your work",
-    code: () => NODE_CODE,
+    code: nodeCode,
     howto: [
       "In your project folder, run the install command below.",
-      "Set the environment variables (pre-filled below) wherever your process reads config.",
       "Add the <code>init()</code> line at startup, and wrap each unit of work in <code>argus.trace()</code> as shown.",
       "Run your app for real; watch the status below.",
     ],
   },
   curl: {
-    env: false,
     install: "",
     codeLabel: "Paste this into a terminal",
     code: curlSnippet,
@@ -220,7 +241,6 @@ function renderTab(tab) {
       `<div class="setup-line"><span class="lbl">Install</span><div class="keybox"><span id="cInstall">${esc(cfg.install)}</span><button class="copy-btn" data-copy="cInstall" type="button">Copy</button></div></div>`,
     );
   }
-  if (cfg.env) parts.push(codeBlock("Environment variables", "cEnv", envBlock()));
   parts.push(codeBlock(cfg.codeLabel, "cCode", cfg.code()));
   parts.push(`</div>`);
   $("#tabBody").innerHTML = parts.join("");

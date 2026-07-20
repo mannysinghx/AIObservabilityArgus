@@ -15,8 +15,9 @@ let timer = null;
 let exitHooked = false;
 
 function authHeader(cfg) {
-  const raw = `${cfg.publicKey}:${cfg.secretKey}`;
-  return "Basic " + Buffer.from(raw).toString("base64");
+  // Single write-only ingest key (preferred), else the legacy public/secret pair.
+  if (cfg.key) return "Bearer " + cfg.key;
+  return "Basic " + Buffer.from(`${cfg.publicKey}:${cfg.secretKey}`).toString("base64");
 }
 
 function ensureTimer() {

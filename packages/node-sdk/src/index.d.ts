@@ -1,7 +1,9 @@
 // Type definitions for @argus/node.
 
 export interface InitOptions {
-  /** Public API key. Falls back to process.env.ARGUS_PUBLIC_KEY. */
+  /** Single write-only ingest key ("ak_live_…"). Falls back to process.env.ARGUS_KEY. */
+  key?: string;
+  /** Legacy public API key. Falls back to process.env.ARGUS_PUBLIC_KEY. */
   publicKey?: string;
   /** Secret API key. Falls back to process.env.ARGUS_SECRET_KEY. */
   secretKey?: string;
@@ -82,7 +84,8 @@ export interface MiddlewareOptions {
 }
 
 export interface ArgusApi {
-  init(opts?: InitOptions): ArgusApi;
+  /** init("ak_live_…") or init({ key }) or init() to read ARGUS_KEY. */
+  init(keyOrOpts?: string | InitOptions): ArgusApi;
   middleware(opts?: MiddlewareOptions): (req: any, res: any, next: any) => void;
   retrieval(name: string, text: unknown, opts?: RetrievalOptions): void;
   tool(name: string, opts?: ToolOptions): void;

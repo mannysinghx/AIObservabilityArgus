@@ -3,9 +3,12 @@
 // this once; every other module reads from getConfig(). Kept deliberately tiny
 // and dependency-free.
 
+// Hosted Argus ingest endpoint. Baked in so a customer never has to configure a
+// URL — self-hosters override with ingestUrl / ARGUS_INGEST_URL.
+const HOSTED_INGEST = "https://argusingest-production.up.railway.app/api/public/ingestion";
+
 const DEFAULTS = {
-  // Where batches are POSTed. Same endpoint the manual tracer and cURL test use.
-  ingestUrl: "http://localhost:3001/api/public/ingestion",
+  ingestUrl: HOSTED_INGEST,
   // How long to buffer observations before flushing, and the max batch size.
   flushIntervalMs: 2000,
   maxBatchSize: 100,
@@ -27,25 +30,30 @@ let state = null; // set by init(); null means "not initialized / disabled"
  * most deployments init() needs no arguments at all.
  */
 function resolveConfig(opts = {}) {
+  // init("ak_live_…") — the zero-config path: one key, nothing else.
+  if (typeof opts === "string") opts = { key: opts };
   const env = process.env;
+  const key = opts.key || env.ARGUS_KEY || "";
   const publicKey = opts.publicKey || env.ARGUS_PUBLIC_KEY || "";
   const secretKey = opts.secretKey || env.ARGUS_SECRET_KEY || "";
   const ingestUrl =
     opts.ingestUrl || env.ARGUS_INGEST_URL || DEFAULTS.ingestUrl;
 
   return {
+    key,
     publicKey,
     secretKey,
     ingestUrl,
-    environment: opts.environment || env.ARGUS_ENV || DEFAULTS.environment,
+    // Auto-detect the environment tag so it isn't one more thing to configure.
+    environment: opts.environment || env.ARGUS_ENV || env.NODE_ENV || DEFAULTS.environment,
     flushIntervalMs: opts.flushIntervalMs ?? DEFAULTS.flushIntervalMs,
     maxBatchSize: opts.maxBatchSize ?? DEFAULTS.maxBatchSize,
     instrumentOpenAI: opts.instrumentOpenAI ?? DEFAULTS.instrumentOpenAI,
     instrumentAnthropic: opts.instrumentAnthropic ?? DEFAULTS.instrumentAnthropic,
     instrumentFetch: opts.instrumentFetch ?? DEFAULTS.instrumentFetch,
     debug: opts.debug ?? (env.ARGUS_DEBUG === "1" || DEFAULTS.debug),
-    // enabled only when we actually have credentials to authenticate with
-    enabled: Boolean(publicKey && secretKey),
+    // Enabled with either the single ingest key or the legacy public/secret pair.
+    enabled: Boolean(key || (publicKey && secretKey)),
   };
 }
 

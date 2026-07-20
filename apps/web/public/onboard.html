@@ -123,17 +123,27 @@
   <!-- STEP 2 -->
   <section class="view-step" id="step2">
     <div class="card">
-      <div class="card-head"><span class="card-title">2. Your API key</span><span class="card-hint">shown once</span></div>
+      <div class="card-head"><span class="card-title">2. Your ingest key</span><span class="card-hint">shown once</span></div>
       <div class="pad" style="display:grid; gap: calc(var(--u)*2.6); padding: calc(var(--u)*3.2);">
-        <div class="warn-box"><b>Save your secret key now.</b> For security, Argus stores only a hash of it — this is the only time it will ever be shown in full.</div>
+        <div class="warn-box"><b>Copy your key now.</b> Argus stores only a hash of it — this is the only time it will ever be shown in full. If you lose it, create a new one from <b>API Keys</b>.</div>
         <div class="field">
-          <label>Public key</label>
-          <div class="keybox"><span id="pubKeyOut"></span><button class="copy-btn" data-copy="pubKeyOut" type="button">Copy</button></div>
+          <label>Ingest key</label>
+          <div class="keybox"><span id="tokenOut"></span><button class="copy-btn" data-copy="tokenOut" type="button">Copy</button></div>
+          <span class="hint">This is the only value you need. It's <b>write-only</b> and scoped to this one application — it can send telemetry, but can't read your data or change anything.</span>
         </div>
-        <div class="field">
-          <label>Secret key</label>
-          <div class="keybox"><span id="secKeyOut"></span><button class="copy-btn" data-copy="secKeyOut" type="button">Copy</button></div>
-        </div>
+        <details style="font-size:12px; color:var(--ink-muted);">
+          <summary style="cursor:pointer;">Advanced: legacy public/secret pair</summary>
+          <div style="display:grid; gap:10px; padding-top:10px;">
+            <div class="field">
+              <label>Public key</label>
+              <div class="keybox"><span id="pubKeyOut"></span><button class="copy-btn" data-copy="pubKeyOut" type="button">Copy</button></div>
+            </div>
+            <div class="field">
+              <label>Secret key</label>
+              <div class="keybox"><span id="secKeyOut"></span><button class="copy-btn" data-copy="secKeyOut" type="button">Copy</button></div>
+            </div>
+          </div>
+        </details>
         <div class="actions">
           <button class="btn btn-primary" id="savedBtn" type="button">I've saved my key — Continue →</button>
         </div>
@@ -145,15 +155,16 @@
   <section class="view-step" id="step3">
     <div class="card">
       <div class="card-head"><span class="card-title">3. Connect your app</span></div>
-      <div class="intro-note">This is your <b>real integration</b> — the same two lines stay in your app for good, and from then on <b>every LLM call is tracked automatically</b>, no per-call code. Pick your framework, follow the numbered steps, deploy, and use your app once for real. <span class="dim">Just want to prove your key works first, with no code? Use the <b>Quick test</b> tab.</span></div>
+      <div class="intro-note">This is your <b>real integration</b> — two lines that stay in your app for good, and from then on <b>every LLM call is tracked automatically</b>, no per-call code. <b>Nothing to configure</b>: your key is already in the snippet, so there are no environment variables to set and no URL to look up. Pick your language, paste, deploy. <span class="dim">Just want to prove the key works first, with no code? Use the <b>Quick test</b> tab.</span></div>
       <div class="tabs" id="snippetTabs">
         <button class="tab-btn active" data-tab="express" type="button">Express</button>
+        <button class="tab-btn" data-tab="python" type="button">Python</button>
         <button class="tab-btn" data-tab="next" type="button">Next.js</button>
         <button class="tab-btn" data-tab="node" type="button">Node (other)</button>
         <button class="tab-btn" data-tab="curl" type="button"><span class="tab-advanced">Quick test (no code)</span></button>
       </div>
       <div id="tabBody"></div>
-      <div class="next-note">That's the whole integration — no per-call code. Retrieval and tool steps are optional one-liners: <code>argus.retrieval(name, text)</code> and <code>argus.tool(name, {input, output})</code>. Your app can be deployed <b>anywhere</b> (Railway, Vercel, Azure, AWS, a VM) — Argus just needs the two keys in its environment. Full walkthrough: <a href="/?guide=onboarding" target="_blank">the step-by-step integration guide</a>.</div>
+      <div class="next-note">That's the whole integration — no per-call code. Retrieval and tool steps are optional one-liners: <code>argus.retrieval(name, text)</code> and <code>argus.tool(name, {input, output})</code>. Your app can be deployed <b>anywhere</b> (Railway, Vercel, Azure, AWS, a VM) — there's nothing to configure on the host. Prefer environment variables? Set <code>ARGUS_KEY</code> instead and call <code>init()</code> with no argument. Full walkthrough: <a href="/?guide=onboarding" target="_blank">the step-by-step integration guide</a>.</div>
     </div>
 
     <div class="card">

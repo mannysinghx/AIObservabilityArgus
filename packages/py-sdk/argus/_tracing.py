@@ -196,10 +196,14 @@ def _post(body: dict):
     if not c or not c.enabled:
         return
     try:
-        auth = b64encode(f"{c.public_key}:{c.secret_key}".encode()).decode()
+        # Single write-only ingest key (preferred), else the legacy pair.
+        if c.key:
+            auth_header = "Bearer " + c.key
+        else:
+            auth_header = "Basic " + b64encode(f"{c.public_key}:{c.secret_key}".encode()).decode()
         req = urllib.request.Request(
             c.ingest_url, data=json.dumps(body).encode(),
-            headers={"content-type": "application/json", "authorization": "Basic " + auth},
+            headers={"content-type": "application/json", "authorization": auth_header},
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310 (trusted URL)

@@ -862,8 +862,11 @@ $("#createKeyBtn")?.addEventListener("click", async () => {
     const d = await res.json().catch(() => ({}));
     if (!res.ok) { banner(d.error || "Create failed"); return; }
     $("#newKeyBox").innerHTML = `<div style="margin:calc(var(--u)*2) calc(var(--u)*3);padding:12px 14px;border:1px solid var(--accent);border-radius:var(--radius);background:color-mix(in srgb,var(--accent) 8%,transparent)">
-      <div style="font-weight:600;margin-bottom:6px">New key created — copy the secret now, it won't be shown again</div>
-      <div class="mono" style="font-size:12px;line-height:1.7">public: ${esc(d.publicKey)}<br>secret: ${esc(d.secretKey)}</div></div>`;
+      <div style="font-weight:600;margin-bottom:6px">New key created — copy it now, it won't be shown again</div>
+      <div class="mono" style="font-size:12px;line-height:1.7">${esc(d.token || "")}</div>
+      <div class="dim" style="font-size:11.5px;margin-top:8px">Drop it straight into your app: <span class="mono">argus.init("${esc(d.token || "")}")</span> — no environment variables needed.</div>
+      <details style="font-size:11.5px;margin-top:8px"><summary style="cursor:pointer">Legacy public/secret pair</summary>
+        <div class="mono" style="font-size:12px;line-height:1.7;padding-top:6px">public: ${esc(d.publicKey)}<br>secret: ${esc(d.secretKey)}</div></details></div>`;
     loadKeys();
   } catch (e) { banner("Create failed: " + e.message); }
 });

@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { ch } from "@argus/shared";
+import { ch, DEFAULT_DETECTION_CONFIG } from "@argus/shared";
 import { pool, sha256 } from "./db.js";
 
 /** Single write-only ingest key — the zero-config credential pasted into init(). */
@@ -66,24 +66,12 @@ export async function createProject(
       [projectId, publicKey, sha256(secretKey), ["ingest"], sha256(token)],
     );
 
-    // A permissive default detection config so scanning works immediately —
-    // matches the shape documented in docs/04 §Detection config.
+    // A permissive default detection config so scanning works immediately. The
+    // canonical shape lives in @argus/shared (DEFAULT_DETECTION_CONFIG) so the
+    // onboarding write, the Settings API, and the runtime consumers can't drift.
     await client.query(
       `INSERT INTO detection_configs (project_id, config) VALUES ($1, $2)`,
-      [
-        projectId,
-        JSON.stringify({
-          layers: {
-            heuristics: { enabled: true, ruleset: "default-v1" },
-            classifiers: { enabled: false, escalation_threshold: 0.75 },
-            judge: { enabled: false, trigger: "escalation-only" },
-            trace_analysis: { enabled: true, instruction_echo: true, exfil_flow: true },
-          },
-          taint: { tool_overrides: {} },
-          canaries: { enabled: true },
-          alerting: { min_severity: "high", channels: [] },
-        }),
-      ],
+      [projectId, JSON.stringify(DEFAULT_DETECTION_CONFIG)],
     );
 
     await client.query("COMMIT");

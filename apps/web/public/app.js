@@ -51,9 +51,10 @@ async function buildSwitcher() {
 function applyRoleUI() {
   const r = ROLE_RANK[PROJECT_ROLE] ?? -1;
   if (PROJECT && r >= 1) $("#manageGroup").style.display = "";
-  const nk = $("#navKeys"), na = $("#navAudit");
+  const nk = $("#navKeys"), na = $("#navAudit"), ns = $("#navSettings");
   if (nk) nk.style.display = PROJECT && r >= 2 ? "" : "none";
   if (na) na.style.display = PROJECT && r >= 2 ? "" : "none"; // audit: admin+
+  if (ns) ns.style.display = PROJECT && r >= 1 ? "" : "none"; // settings: view member+, save admin+
 }
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -170,7 +171,7 @@ function breakdown(sel, items, isSev) {
 }
 
 // ---------- routing ----------
-const VIEWS = ["apps", "overview", "threat", "incidents", "review", "redteam", "traces", "trace", "sessions", "analytics", "prompts", "evals", "keys", "team", "audit", "admin", "customers", "adminusers", "auditall", "appearance", "guide"];
+const VIEWS = ["apps", "overview", "threat", "incidents", "review", "redteam", "traces", "trace", "sessions", "analytics", "prompts", "evals", "settings", "keys", "team", "audit", "admin", "customers", "adminusers", "auditall", "appearance", "guide"];
 function show(view) {
   VIEWS.forEach((v) => $(`#view-${v}`).classList.toggle("on", v === view));
   document.querySelectorAll(".nav-item[data-nav]").forEach((b) => b.classList.toggle("active", b.dataset.nav === view));
@@ -697,13 +698,13 @@ function applyFilter(q) {
 
 // ---------- loader dispatch ----------
 // Views that only make sense inside a selected application.
-const SCOPED_VIEWS = new Set(["overview", "threat", "incidents", "review", "redteam", "traces", "sessions", "analytics", "prompts", "evals", "keys", "team", "audit"]);
+const SCOPED_VIEWS = new Set(["overview", "threat", "incidents", "review", "redteam", "traces", "sessions", "analytics", "prompts", "evals", "settings", "keys", "team", "audit"]);
 function load(view) {
   // Any re-render replaces the rows the filter was hiding, so drop the stale
   // "N of M match" note rather than leaving it contradicting the screen.
   if (searchInput) { searchInput.value = ""; const n = $("#searchNote"); if (n) n.textContent = ""; }
   if (!PROJECT && SCOPED_VIEWS.has(view)) { banner("Select an application from Applications to view its data."); return; }
-  ({ apps: loadApps, overview: loadOverview, threat: loadThreat, incidents: loadIncidents, review: loadReview, traces: loadTraces, sessions: loadSessions, analytics: loadAnalytics, evals: loadEvals, keys: loadKeys, team: loadTeam, audit: loadAudit, admin: loadAdmin, customers: loadCustomers, adminusers: loadAdminUsers, auditall: loadAuditAll }[view] || (() => {}))();
+  ({ apps: loadApps, overview: loadOverview, threat: loadThreat, incidents: loadIncidents, review: loadReview, traces: loadTraces, sessions: loadSessions, analytics: loadAnalytics, evals: loadEvals, settings: loadSettings, keys: loadKeys, team: loadTeam, audit: loadAudit, admin: loadAdmin, customers: loadCustomers, adminusers: loadAdminUsers, auditall: loadAuditAll }[view] || (() => {}))();
 }
 
 // ---------- Audit log ----------
@@ -713,6 +714,7 @@ const ACTION_LABELS = {
   "member.invited": "Invited member", "member.role_changed": "Changed member role",
   "member.removed": "Removed member", "member.invite_revoked": "Revoked invite",
   "event.verdict_set": "Set security verdict", "project.created": "Created application",
+  "settings.updated": "Updated settings",
   "admin.platform_admin_changed": "Changed platform-admin", "admin.user_deleted": "Deleted user",
   "admin.company_created": "Created company", "admin.company_renamed": "Renamed company",
   "admin.company_deleted": "Deleted company",
@@ -843,6 +845,63 @@ async function loadAdminUsers() {
 }
 
 // ---------- API Keys (admin+) ----------
+// ---------- Application settings (detection config) ----------
+// Read is member+; save is admin+ (server-enforced). Non-admins see the current
+// settings but the controls are disabled.
+let SETTINGS_CFG = null;
+async function loadSettings() {
+  if (!PROJECT) { banner("Open an application to view its settings."); return; }
+  try {
+    const d = await api("/api/settings"); banner("");
+    SETTINGS_CFG = d.config;
+    const canEdit = (ROLE_RANK[PROJECT_ROLE] ?? -1) >= 2;
+    fillSettings(d.config, canEdit);
+    const who = d.updatedBy ? ` · last changed by ${esc(d.updatedBy)}` : "";
+    $("#settingsSub").innerHTML = (canEdit ? "Changes apply within ~30s — no redeploy" : "Read-only — admin role required to change") + who;
+    $("#saveSettingsBtn").style.display = canEdit ? "" : "none";
+    $("#settingsSaveNote").textContent = "";
+    stamp();
+  } catch (e) { banner("Settings query failed: " + e.message); }
+}
+
+function fillSettings(c, canEdit) {
+  const pct = Math.round((c.sampling?.trace_sample_rate ?? 1) * 100);
+  $("#setSample").value = pct;
+  $("#setSampleVal").textContent = pct + "%";
+  $("#setRedact").value = c.redaction?.mode || "off";
+  $("#setL2").checked = !!c.layers?.classifiers?.enabled;
+  $("#setL4").checked = !!c.layers?.trace_analysis?.enabled;
+  $("#setAlertSev").value = c.alerting?.min_severity || "high";
+  // Disable the editable controls for non-admins (L1/L3 stay disabled always).
+  ["setSample", "setRedact", "setL2", "setL4", "setAlertSev"].forEach((id) => { const el = $("#" + id); if (el) el.disabled = !canEdit; });
+}
+
+$("#setSample")?.addEventListener("input", () => { $("#setSampleVal").textContent = $("#setSample").value + "%"; });
+
+$("#saveSettingsBtn")?.addEventListener("click", async () => {
+  if (!SETTINGS_CFG) return;
+  // Start from the loaded config so untouched fields (canaries, thresholds,
+  // heuristics ruleset) are preserved, then overlay the controls we expose.
+  const cfg = JSON.parse(JSON.stringify(SETTINGS_CFG));
+  cfg.sampling = { trace_sample_rate: Number($("#setSample").value) / 100 };
+  cfg.redaction = { mode: $("#setRedact").value };
+  cfg.layers = cfg.layers || {};
+  cfg.layers.classifiers = { ...(cfg.layers.classifiers || {}), enabled: $("#setL2").checked };
+  cfg.layers.trace_analysis = { ...(cfg.layers.trace_analysis || {}), enabled: $("#setL4").checked };
+  cfg.alerting = { ...(cfg.alerting || {}), min_severity: $("#setAlertSev").value };
+  const btn = $("#saveSettingsBtn");
+  btn.disabled = true; btn.textContent = "Saving…";
+  try {
+    const res = await fetch("/api/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ project: PROJECT, config: cfg }) });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { banner(d.error || "Save failed"); return; }
+    SETTINGS_CFG = d.config;
+    fillSettings(d.config, true);
+    $("#settingsSaveNote").textContent = `Saved (v${d.version}) — live within ~30s.`;
+  } catch (e) { banner("Save failed: " + e.message); }
+  finally { btn.disabled = false; btn.textContent = "Save settings"; }
+});
+
 async function loadKeys() {
   if (!PROJECT) { banner("Open an application to manage its API keys."); return; }
   try {

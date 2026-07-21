@@ -105,6 +105,7 @@
     </div>
     <div class="nav-group" id="manageGroup" style="display:none">
       <div class="nav-label">Manage</div>
+      <button class="nav-item" type="button" data-nav="settings" id="navSettings"><span class="nav-ico">⚙</span>Settings</button>
       <button class="nav-item" type="button" data-nav="keys" id="navKeys"><span class="nav-ico">⚿</span>API Keys</button>
       <button class="nav-item" type="button" data-nav="team"><span class="nav-ico">◍</span>Team</button>
       <button class="nav-item" type="button" data-nav="audit" id="navAudit"><span class="nav-ico">≡</span>Audit log</button>
@@ -119,7 +120,7 @@
     <div class="rail-foot">
       <a class="nav-item" href="/onboard.html" style="text-decoration:none;"><span class="nav-ico">+</span>Connect a new app</a>
       <button class="nav-item" type="button" data-nav="guide"><span class="nav-ico">ℹ</span>User Guide</button>
-      <button class="nav-item" type="button" data-nav="appearance"><span class="nav-ico">⚙</span>Settings</button>
+      <button class="nav-item" type="button" data-nav="appearance"><span class="nav-ico">◐</span>Appearance</button>
     </div>
   </nav>
 
@@ -199,6 +200,77 @@
         <div class="card">
           <div class="card-head"><span class="card-title">Members</span></div>
           <div class="tablewrap"><table id="teamTable"><tbody><tr><td class="loading">loading…</td></tr></tbody></table></div>
+        </div>
+      </section>
+
+      <!-- APPLICATION SETTINGS (detection config) -->
+      <section class="view" id="view-settings">
+        <div class="page-head"><h1 class="page-title">Settings</h1><span class="page-sub"><span id="settingsSub">loading…</span></span></div>
+        <div class="set-intro card" style="padding:calc(var(--u)*2.6) calc(var(--u)*3.2);font-size:12.5px;color:var(--ink-muted)">
+          These settings live in Argus and take effect within ~30&nbsp;seconds — <b>no code change or redeploy of your app is needed</b>. Your app only ever carries its ingest key; everything about how its data is sampled, scrubbed, scanned, and alerted on is controlled right here.
+        </div>
+
+        <div class="card">
+          <div class="card-head"><span class="card-title">Data collection</span></div>
+          <div class="pad" style="display:grid;gap:calc(var(--u)*3.5);padding:calc(var(--u)*3.2)">
+            <div class="set-row">
+              <div class="set-label"><label for="setSample">Trace sampling</label><span class="set-hint">Keep this share of traffic. Sampled-out traces are dropped entirely — including security scanning — so leave at 100% unless volume/cost forces otherwise.</span></div>
+              <div class="set-control" style="display:flex;align-items:center;gap:10px">
+                <input id="setSample" type="range" min="0" max="100" step="5" value="100" style="flex:1;max-width:220px">
+                <span id="setSampleVal" class="mono" style="min-width:44px;text-align:right">100%</span>
+              </div>
+            </div>
+            <div class="set-row">
+              <div class="set-label"><label for="setRedact">Redaction</label><span class="set-hint">Scrub content before it's stored. <b>Mask PII</b> hides emails, cards, SSNs, phones, IPs and keys but leaves attack text intact, so detection still works. <b>Drop content</b> removes all text — maximum privacy, but the detectors have nothing left to scan.</span></div>
+              <div class="set-control">
+                <select id="setRedact" class="set-select">
+                  <option value="off">Off — store content as received</option>
+                  <option value="mask_pii">Mask PII (recommended for sensitive apps)</option>
+                  <option value="drop_content">Drop content entirely</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><span class="card-title">Detection layers</span><span class="card-hint">what runs on every call</span></div>
+          <div class="pad" style="display:grid;gap:calc(var(--u)*2.6);padding:calc(var(--u)*3.2)">
+            <label class="set-check"><input type="checkbox" id="setL1" checked disabled><span><b>L1 · Heuristic rules</b> <span class="set-hint">Always on — the fast baseline ruleset (default-v1) that flags known injection patterns.</span></span></label>
+            <label class="set-check"><input type="checkbox" id="setL2"><span><b>L2 · ML classifiers</b> <span class="set-hint">Transformer models that catch novel phrasing L1 misses. Runs only on untrusted or already-suspicious content. Slightly higher cost/latency.</span></span></label>
+            <label class="set-check"><input type="checkbox" id="setL4"><span><b>L4 · Trace analysis</b> <span class="set-hint">Whole-trace reasoning: taint propagation, instruction echo, and data-exfiltration flow across steps.</span></span></label>
+            <label class="set-check set-disabled"><input type="checkbox" id="setL3" disabled><span><b>L3 · LLM judge</b> <span class="pill pill-neutral" style="font-size:10px">coming soon</span> <span class="set-hint">An LLM adjudicates ambiguous cases. Not yet available — this toggle is a placeholder.</span></span></label>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><span class="card-title">Alerting</span></div>
+          <div class="pad" style="display:grid;gap:calc(var(--u)*3.5);padding:calc(var(--u)*3.2)">
+            <div class="set-row">
+              <div class="set-label"><label for="setAlertSev">Alert threshold</label><span class="set-hint">Send an alert when a detection is at least this severe. Lower thresholds catch more but are noisier.</span></div>
+              <div class="set-control">
+                <select id="setAlertSev" class="set-select">
+                  <option value="info">Info and above (everything)</option>
+                  <option value="low">Low and above</option>
+                  <option value="medium">Medium and above</option>
+                  <option value="high">High and above</option>
+                  <option value="critical">Critical only</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><span class="card-title">Enforcement</span><span class="card-hint">roadmap</span></div>
+          <div class="pad" style="padding:calc(var(--u)*3.2);font-size:12.5px;color:var(--ink-muted)">
+            Argus currently runs in <b>Observe</b> mode — it records and alerts, off your app's critical path, so it can never add latency or block a request. <b>Inline blocking</b> (stopping a prompt injection before your model sees it) requires the optional gateway and will appear here when it ships.
+          </div>
+        </div>
+
+        <div class="set-actions" style="display:flex;align-items:center;gap:14px;padding:0 calc(var(--u)*1)">
+          <button class="btn btn-primary" id="saveSettingsBtn" type="button" style="padding:8px 16px;font-size:13px">Save settings</button>
+          <span id="settingsSaveNote" class="dim" style="font-size:12px"></span>
         </div>
       </section>
 

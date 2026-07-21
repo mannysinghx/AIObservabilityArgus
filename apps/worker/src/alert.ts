@@ -5,8 +5,14 @@ import { config, SEVERITY_ORDER, type Finding } from "@argus/shared";
  * detection provenance so an analyst goes from alert to evidence in one hop
  * (docs/02 §Alert router). Dedup/suppression/Slack/PagerDuty land in Phase 2.
  */
-export async function maybeAlert(projectId: string, finding: Finding) {
-  if (SEVERITY_ORDER[finding.severity] < SEVERITY_ORDER[config.alertMinSeverity]) {
+export async function maybeAlert(
+  projectId: string,
+  finding: Finding,
+  // Per-project threshold from the app's Settings; falls back to the global env
+  // default when a caller doesn't supply one.
+  minSeverity: string = config.alertMinSeverity,
+) {
+  if (SEVERITY_ORDER[finding.severity] < (SEVERITY_ORDER[minSeverity] ?? SEVERITY_ORDER[config.alertMinSeverity])) {
     return;
   }
   const payload = {

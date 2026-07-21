@@ -11,6 +11,7 @@ import * as Onboarding from "./onboarding.js";
 import * as Auth from "./auth.js";
 import * as Admin from "./admin.js";
 import * as Audit from "./audit.js";
+import * as Settings from "./settings.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, "..", "public");
@@ -322,6 +323,29 @@ app.post<{ Body: { project?: string; userId?: string; email?: string } }>("/api/
     return { ok: true };
   }
   reply.code(400).send({ error: "userId or email required" });
+});
+
+// ---------------- application settings (view: member+, change: admin+) ----------------
+// The per-application detection config lives here and is read by ingest + worker
+// at request time — so a customer tunes sampling, redaction, detection layers and
+// alerting from this UI, and never from their own app's code.
+app.get("/api/settings", async (req, reply) => {
+  const project = (req.query as ScopedQuery).project;
+  const g = await roleGate(req, reply, project, "member");
+  if (!g) return;
+  try { return await Settings.getSettings(project!); }
+  catch (err) { app.log.error({ err }, "settings read failed"); reply.code(503).send({ error: String(err) }); }
+});
+
+app.put<{ Body: { project?: string; config?: unknown } }>("/api/settings", async (req, reply) => {
+  const project = req.body?.project;
+  const g = await roleGate(req, reply, project, "admin");
+  if (!g) return;
+  try {
+    const r = await Settings.updateSettings(project!, req.body?.config, userOf(req)!.email);
+    audit(req, "settings.updated", { orgId: g.orgId, targetType: "project", target: project, metadata: { version: r.version } });
+    return r;
+  } catch (err) { app.log.error({ err }, "settings write failed"); reply.code(500).send({ error: String(err) }); }
 });
 
 app.get<{ Params: { id: string }; Querystring: ScopedQuery }>("/api/trace/:id", async (req, reply) => {

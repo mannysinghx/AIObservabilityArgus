@@ -3,6 +3,7 @@ import {
   insertRows,
   redis,
   toChDateTime,
+  loadProjectConfig,
   type Finding,
   type StreamEvent,
   type ObservationInput,
@@ -39,11 +40,11 @@ function findingToRow(projectId: string, f: Finding): Record<string, unknown> {
   };
 }
 
-async function persistAndAlert(projectId: string, findings: Finding[]) {
+async function persistAndAlert(projectId: string, findings: Finding[], minSeverity: string) {
   if (findings.length === 0) return;
   const rows = findings.map((f) => findingToRow(projectId, f));
   await insertRows("security_events", rows);
-  for (const f of findings) await maybeAlert(projectId, f);
+  for (const f of findings) await maybeAlert(projectId, f, minSeverity);
   console.log(
     `[security-workers] raised ${findings.length} event(s): ` +
       findings.map((f) => `${f.severity}/${f.category}`).join(", "),
@@ -60,23 +61,33 @@ export async function handleSecurityBatch(events: StreamEvent[]) {
   const r = redis();
 
   for (const ev of events) {
+    // Per-application config: which layers run, and the alert threshold. Cached
+    // (~30s) and fails open to defaults, so a config read never stalls scanning.
+    const cfg = await loadProjectConfig(ev.projectId);
+    const minSeverity = cfg.alerting.min_severity;
+
     if (ev.kind === "observation") {
       const o = ev.payload as ObservationInput;
       // buffer for later L4
       await r.rpush(bufKey(ev.projectId, o.traceId), JSON.stringify(o));
       await r.expire(bufKey(ev.projectId, o.traceId), BUF_TTL_SECONDS);
-      // span-level scan now
+      // span-level scan now (L1 always; L2 only if the project enabled classifiers)
       try {
-        const findings = await scanObservation(ev.projectId, o);
-        await persistAndAlert(ev.projectId, findings);
+        const findings = await scanObservation(ev.projectId, o, cfg.layers.classifiers.enabled);
+        await persistAndAlert(ev.projectId, findings, minSeverity);
       } catch (err) {
         console.error("[security-workers] span scan failed:", err);
         throw err; // let consumer retry the batch
       }
     } else {
-      // trace summary => run L4 over the buffered observations
+      // trace summary => run L4 over the buffered observations, unless the
+      // project turned trace analysis off.
       const traceId = (ev.payload as { traceId: string }).traceId;
       const key = bufKey(ev.projectId, traceId);
+      if (!cfg.layers.trace_analysis.enabled) {
+        await r.del(key); // don't leak the buffer we won't consume
+        continue;
+      }
       const raw = await r.lrange(key, 0, -1);
       if (raw.length === 0) continue;
       const observations = raw
@@ -90,7 +101,7 @@ export async function handleSecurityBatch(events: StreamEvent[]) {
         .filter((x): x is ObservationInput => x !== null);
       try {
         const findings = await scanTrace(ev.projectId, traceId, observations);
-        await persistAndAlert(ev.projectId, findings);
+        await persistAndAlert(ev.projectId, findings, minSeverity);
       } catch (err) {
         console.error("[security-workers] trace scan failed:", err);
         throw err;

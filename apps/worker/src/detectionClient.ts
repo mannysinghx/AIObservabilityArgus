@@ -33,7 +33,7 @@ function contentOf(o: ObservationInput): string {
   return [o.input, o.output].filter(Boolean).join("\n");
 }
 
-export function toScanObs(projectId: string, o: ObservationInput): ScanObsBody {
+export function toScanObs(projectId: string, o: ObservationInput, enableL2: boolean): ScanObsBody {
   return {
     project_id: projectId,
     observation: {
@@ -50,18 +50,21 @@ export function toScanObs(projectId: string, o: ObservationInput): ScanObsBody {
       attributes: o.attributes ?? {},
     },
     tool_overrides: {},
-    enable_l2: config.detectionEnableL2,
+    enable_l2: enableL2,
   };
 }
 
 export async function scanObservation(
   projectId: string,
   o: ObservationInput,
+  // Per-project L2 toggle from the app's Settings; falls back to the global env
+  // default when a caller doesn't supply one.
+  enableL2: boolean = config.detectionEnableL2,
 ): Promise<Finding[]> {
   const res = await fetch(`${config.detectionUrl}/v1/scan`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(toScanObs(projectId, o)),
+    body: JSON.stringify(toScanObs(projectId, o, enableL2)),
   });
   if (!res.ok) throw new Error(`detection /v1/scan ${res.status}`);
   const data = (await res.json()) as { findings: Finding[] };

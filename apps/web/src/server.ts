@@ -67,6 +67,20 @@ for (const page of HTML_PAGES) {
   app.get(`/${page}`, async (_req, reply) => sendHtml(page, reply) ?? reply.callNotFound());
 }
 
+// ---------------- public demo (removable, flag-gated) ----------------
+// A completely separate, login-free marketing demo. It lives OUTSIDE the static
+// public dir and is served only through this route, so setting DEMO_ENABLED=0
+// makes it fully unreachable, and deleting apps/web/demo/ + this block removes
+// it with no other impact. The file is self-contained synthetic data — it never
+// reads live customer data.
+const DEMO_ENABLED = process.env.DEMO_ENABLED !== "0";
+let demoHtml: string | null = null;
+try { demoHtml = readFileSync(join(__dirname, "..", "demo", "index.html"), "utf8"); } catch { /* absent — /demo 404s */ }
+app.get("/demo", async (_req, reply) => {
+  if (!DEMO_ENABLED || demoHtml === null) return reply.callNotFound();
+  return reply.header("content-type", "text/html; charset=utf-8").header("cache-control", "no-cache").send(demoHtml);
+});
+
 // `index: false` — "/" is served by the route above, not by static's own index.
 await app.register(fastifyStatic, { root: PUBLIC_DIR, prefix: "/", index: false });
 app.log.info({ assetVersion: ASSET_VERSION }, "static assets versioned");

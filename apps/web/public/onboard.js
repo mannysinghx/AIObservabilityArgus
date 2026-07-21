@@ -83,21 +83,24 @@ function flashCopied(btn) {
 
 // ---------- Step 3: the real, SDK-first integration ----------
 // The drop-in @argus/node SDK is the actual integration — the same two lines
-// stay in the app permanently. Each framework tab shows: install, env vars
-// (pre-filled with this project's keys), and the code. The "curl" tab is a
-// throwaway connectivity check for people who want to see the key light up
-// before touching their app.
+// stay in the app permanently. Each framework tab shows: install, the one
+// environment variable to set, and the code. The "curl" tab is a throwaway
+// connectivity check for people who want to see the key light up first.
 
-// The ingest key is embedded directly in the snippet — no environment variables,
-// no URL to configure. It's write-only and scoped to this one application, so it
-// can only add telemetry (it can't read your data or change anything), and you
-// can rotate it any time from API Keys.
+// The ingest key is the ONE credential your app needs. Best practice — the same
+// way you already handle your OpenAI key — is to put it in an environment
+// variable (ARGUS_KEY), so it never lives in your source code. init() with no
+// argument reads it automatically. It's write-only and scoped to this one app, so
+// it can only add telemetry (never read your data or change anything), and you
+// can rotate it any time from API Keys. Everything about *how* Argus behaves —
+// sampling, redaction, detection, alerts — lives in the dashboard, not your code.
 const KEY = () => project.token;
+const ENV = () => `ARGUS_KEY=${KEY()}`;
 
 function expressCode() {
   return `// 1) At the very top of your entry file (app.js / server.js),
 //    before you create any LLM clients:
-const argus = require("@argus/node").init("${KEY()}");
+const argus = require("@argus/node").init();   // reads ARGUS_KEY from the environment
 
 // 2) Right after you create your Express app:
 app.use(argus.middleware());
@@ -109,7 +112,7 @@ app.use(argus.middleware());
 function pythonCode() {
   return `# 1) At startup (e.g. main.py), before you create any LLM clients:
 import argus
-argus.init("${KEY()}")
+argus.init()            # reads ARGUS_KEY from the environment
 
 # 2) On your FastAPI app:
 app.add_middleware(argus.Middleware)
@@ -120,7 +123,7 @@ app.add_middleware(argus.Middleware)
 
 function nextCode() {
   return `// lib/argus.js — import once so init() runs at startup
-const argus = require("@argus/node").init("${KEY()}");
+const argus = require("@argus/node").init();   // reads ARGUS_KEY
 module.exports = argus;
 
 // In each route handler, wrap the work and flush before returning
@@ -138,13 +141,20 @@ export async function POST(req) {
 
 function nodeCode() {
   return `// At startup, before creating LLM clients:
-const argus = require("@argus/node").init("${KEY()}");
+const argus = require("@argus/node").init();   // reads ARGUS_KEY
 
 // Wrap each job / request so its LLM calls group into one trace:
 await argus.trace("summarize-job", async () => {
   // ...your existing code — LLM calls here are captured automatically
 });
 // (A standalone call outside any trace() is still captured — one trace each.)`;
+}
+
+// Fallback for hosts where you genuinely can't set an env var: pass the key
+// straight into init(). Same result — it just puts the credential in your source.
+function inlineFallback(tab) {
+  const call = tab === "python" ? `argus.init("${KEY()}")` : `require("@argus/node").init("${KEY()}")`;
+  return `Can't set environment variables on your host? Pass the key directly instead — <code>${esc(call)}</code>. It works the same; it just lives in your code rather than your environment.`;
 }
 
 // Throwaway connectivity check. Trace/observation IDs are unique per project
@@ -171,46 +181,55 @@ function curlSnippet() {
 const TABS = {
   express: {
     install: "npm install @argus/node",
-    codeLabel: "Add two lines to your app — your key is already in it",
+    env: true,
+    codeLabel: "Add two lines to your app",
     code: expressCode,
     howto: [
       "In a terminal, in your app's project folder, run the install command below.",
-      "Copy the two lines below into your app: the <code>init()</code> line at the very top of your entry file, the <code>middleware()</code> line right after you create your Express app. <b>No environment variables needed</b> — your key is in the snippet.",
+      "Set the <code>ARGUS_KEY</code> environment variable where your app runs — the exact line is below. On Railway/Render/Fly/Vercel that's the Variables tab; with Docker it's <code>-e</code> or your compose file; locally a <code>.env</code>. This is the only value your app needs.",
+      "Add the two lines below: <code>init()</code> at the very top of your entry file, <code>middleware()</code> right after you create your Express app. <code>init()</code> reads the key from the environment — nothing hard-coded.",
       "Deploy the way you always do (<code>git push</code> / your platform's deploy / a restart), then use your app once for real — watch the status below flip to <b>Connected</b>.",
     ],
   },
   python: {
     install: "pip install argus-tracer",
-    codeLabel: "Add two lines to your app — your key is already in it",
+    env: true,
+    codeLabel: "Add two lines to your app",
     code: pythonCode,
     howto: [
       "In your project folder, run the install command below.",
-      "Copy the two lines below: <code>argus.init(...)</code> at startup, and the middleware on your FastAPI app. <b>No environment variables needed</b> — your key is in the snippet.",
+      "Set the <code>ARGUS_KEY</code> environment variable where your app runs — the exact line is below. Same place you already set your OpenAI key.",
+      "Add the two lines below: <code>argus.init()</code> at startup, and the middleware on your FastAPI app. <code>init()</code> reads the key from the environment.",
       "Deploy or restart, then use your app once for real — watch the status below flip to <b>Connected</b>.",
     ],
   },
   next: {
     install: "npm install @argus/node",
+    env: true,
     codeLabel: "Wire it into your route handlers",
     code: nextCode,
     howto: [
       "In your project folder, run the install command below.",
+      "Set the <code>ARGUS_KEY</code> environment variable in your hosting platform (e.g. Vercel → Project → Settings → Environment Variables). The exact line is below.",
       "Add the <code>init()</code> line once at startup, then wrap each route handler as shown. Keep the <code>argus.flush()</code> before you return — serverless functions can freeze the moment they respond.",
       "Deploy, trigger a real request, and watch the status below.",
     ],
   },
   node: {
     install: "npm install @argus/node",
+    env: true,
     codeLabel: "Initialize and wrap your work",
     code: nodeCode,
     howto: [
       "In your project folder, run the install command below.",
+      "Set the <code>ARGUS_KEY</code> environment variable where the worker/script runs — the exact line is below.",
       "Add the <code>init()</code> line at startup, and wrap each unit of work in <code>argus.trace()</code> as shown.",
       "Run your app for real; watch the status below.",
     ],
   },
   curl: {
     install: "",
+    env: false,
     codeLabel: "Paste this into a terminal",
     code: curlSnippet,
     howto: [
@@ -241,7 +260,15 @@ function renderTab(tab) {
       `<div class="setup-line"><span class="lbl">Install</span><div class="keybox"><span id="cInstall">${esc(cfg.install)}</span><button class="copy-btn" data-copy="cInstall" type="button">Copy</button></div></div>`,
     );
   }
+  if (cfg.env) {
+    parts.push(
+      `<div class="setup-line"><span class="lbl">Env var</span><div class="keybox"><span id="cEnv">${esc(ENV())}</span><button class="copy-btn" data-copy="cEnv" type="button">Copy</button></div></div>`,
+    );
+  }
   parts.push(codeBlock(cfg.codeLabel, "cCode", cfg.code()));
+  if (cfg.env) {
+    parts.push(`<div class="fallback-note">${inlineFallback(tab)}</div>`);
+  }
   parts.push(`</div>`);
   $("#tabBody").innerHTML = parts.join("");
 }

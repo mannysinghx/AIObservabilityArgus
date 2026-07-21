@@ -84,6 +84,8 @@
     .setup-line { display: flex; align-items: center; gap: 8px; }
     .setup-line .lbl { font-size: 11.5px; font-weight: 600; color: var(--ink-faint); flex: none; width: 52px; }
     .setup-line .keybox { flex: 1; }
+    .fallback-note { font-size: 11.5px; color: var(--ink-faint); line-height: 1.6; padding-top: 2px; }
+    .fallback-note code { font-family: var(--font-mono); font-size: 11px; background: var(--surface-2); border-radius: 4px; padding: 1px 5px; word-break: break-all; }
   </style>
 </head>
 <body>
@@ -93,7 +95,7 @@
       <span class="brand-mark" aria-hidden="true"></span>
       <h1 class="onb-title">Connect your app to Argus</h1>
     </div>
-    <p class="onb-sub">Get an API key and start streaming traces in under a minute — no login required.</p>
+    <p class="onb-sub">Name your app, get one ingest key, and start streaming traces in under a minute.</p>
     <div class="onb-steps" id="stepDots">
       <span class="onb-step-dot active" data-dot="1"></span>
       <span class="onb-step-dot" data-dot="2"></span>
@@ -155,7 +157,7 @@
   <section class="view-step" id="step3">
     <div class="card">
       <div class="card-head"><span class="card-title">3. Connect your app</span></div>
-      <div class="intro-note">This is your <b>real integration</b> — two lines that stay in your app for good, and from then on <b>every LLM call is tracked automatically</b>, no per-call code. <b>Nothing to configure</b>: your key is already in the snippet, so there are no environment variables to set and no URL to look up. Pick your language, paste, deploy. <span class="dim">Just want to prove the key works first, with no code? Use the <b>Quick test</b> tab.</span></div>
+      <div class="intro-note">This is your <b>real integration</b> — two lines that stay in your app for good, and from then on <b>every LLM call is tracked automatically</b>, no per-call code. You set <b>one environment variable</b> (<code>ARGUS_KEY</code>) — the same way you already handle your OpenAI key, so the credential never lives in your source. Everything about <i>how</i> Argus behaves — sampling, redaction, detection, alerts — is controlled in the dashboard, not your code. Pick your language, set the variable, paste, deploy. <span class="dim">Just want to prove the key works first, with no code? Use the <b>Quick test</b> tab.</span></div>
       <div class="tabs" id="snippetTabs">
         <button class="tab-btn active" data-tab="express" type="button">Express</button>
         <button class="tab-btn" data-tab="python" type="button">Python</button>
@@ -164,7 +166,7 @@
         <button class="tab-btn" data-tab="curl" type="button"><span class="tab-advanced">Quick test (no code)</span></button>
       </div>
       <div id="tabBody"></div>
-      <div class="next-note">That's the whole integration — no per-call code. Retrieval and tool steps are optional one-liners: <code>argus.retrieval(name, text)</code> and <code>argus.tool(name, {input, output})</code>. Your app can be deployed <b>anywhere</b> (Railway, Vercel, Azure, AWS, a VM) — there's nothing to configure on the host. Prefer environment variables? Set <code>ARGUS_KEY</code> instead and call <code>init()</code> with no argument. Full walkthrough: <a href="/?guide=onboarding" target="_blank">the step-by-step integration guide</a>.</div>
+      <div class="next-note">That's the whole integration — no per-call code. Retrieval and tool steps are optional one-liners: <code>argus.retrieval(name, text)</code> and <code>argus.tool(name, {input, output})</code>. Your app can run <b>anywhere</b> (Railway, Vercel, Azure, AWS, a VM) — it just needs <code>ARGUS_KEY</code> in its environment. Full walkthrough: <a href="/?guide=onboarding" target="_blank">the step-by-step integration guide</a>.</div>
     </div>
 
     <div class="card">

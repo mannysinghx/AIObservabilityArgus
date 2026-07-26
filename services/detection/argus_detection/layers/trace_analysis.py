@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import re
 
+from .. import taint as taint_mod
 from ..models import (
     Category,
     Finding,
@@ -30,7 +31,6 @@ from ..models import (
     Severity,
     TaintClass,
 )
-from .. import taint as taint_mod
 
 # Tools whose invocation constitutes an outbound side effect (blast radius).
 _SIDE_EFFECT_HINTS = (
@@ -160,9 +160,18 @@ def analyze(
             for j, jt in enumerate(span_tokens):
                 if j == i or not jt:
                     continue
-                if taints[j] in (TaintClass.user, TaintClass.system, TaintClass.model, TaintClass.untrusted_external):
-                    if _jaccard(jt, this_tokens) >= 0.25 and taints[j] != TaintClass.untrusted_external:
-                        carried.add(j)
+                # The outer guard here used to list all four TaintClass members,
+                # which is every possible value — so it tested nothing, and the
+                # only real condition was the untrusted_external exclusion in
+                # the inner branch. Stated directly: we're looking for content
+                # that came from a *trusted* span and ended up in this outbound
+                # payload. Untrusted spans are excluded because content flowing
+                # from the attacker's own document back out again is the
+                # attacker quoting themselves, not data being exfiltrated.
+                if taints[j] == TaintClass.untrusted_external:
+                    continue
+                if _jaccard(jt, this_tokens) >= 0.25:
+                    carried.add(j)
             if to_untrusted or (carried and best_echo >= 0.35):
                 signals.append("exfil_flow")
                 category = Category.exfiltration

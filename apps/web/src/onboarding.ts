@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { ch, DEFAULT_DETECTION_CONFIG } from "@argus/shared";
+import { ch, DEFAULT_DETECTION_CONFIG, publishKeyRevoked } from "@argus/shared";
 import { pool, sha256 } from "./db.js";
 
 /** Single write-only ingest key — the zero-config credential pasted into init(). */
@@ -219,6 +219,9 @@ export async function revokeKey(projectId: string, keyId: string): Promise<{ ok:
   if ((count.rows[0] as { n: number }).n <= 1) return { error: "Can't revoke the last key — create a new one first." };
   const res = await pool.query("DELETE FROM api_keys WHERE id = $1 AND project_id = $2", [safeK, safeP]);
   if (!res.rowCount) return { error: "Key not found." };
+  // Tell the ingest replicas to forget their cached lookups now, rather than
+  // letting the revoked key keep working until its cache entry expires.
+  await publishKeyRevoked(safeP);
   return { ok: true };
 }
 

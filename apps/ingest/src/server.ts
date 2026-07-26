@@ -8,6 +8,8 @@ import {
   otlpToObservations,
   loadProjectConfig,
   redactObservation,
+  rateLimit,
+  LIMITS,
   type OtlpTracePayload,
   type StreamEvent,
   type ObservationInput,
@@ -80,9 +82,27 @@ app.addHook("preHandler", async (req, reply) => {
   }
 
   if (!project) {
+    // Unauthenticated attempts are limited by IP so a stolen-key hunt or a
+    // credential-stuffing sweep can't run at line rate against Postgres.
+    await rateLimit(`ingest-auth:${req.ip}`, 60, 60_000);
     reply.code(401).send({ error: "invalid or missing credentials — send 'Authorization: Bearer <ingest key>'" });
     return;
   }
+
+  // Per-project quota. Telemetry ingest is the one endpoint a customer's own
+  // code calls in a loop, so a runaway retry in *their* app is the realistic
+  // failure — it fills ClickHouse and the Redis stream for every other tenant
+  // sharing the deployment. Limiting by project (not IP) is what makes this a
+  // noisy-neighbour control rather than an anti-abuse one.
+  const quota = await rateLimit(`ingest:${project.projectId}`, LIMITS.ingest.limit, LIMITS.ingest.windowMs);
+  if (!quota.allowed) {
+    reply
+      .code(429)
+      .header("retry-after", String(Math.ceil(quota.resetMs / 1000)))
+      .send({ error: "ingest rate limit exceeded for this project", retryAfterMs: quota.resetMs });
+    return;
+  }
+
   (req as unknown as { projectId: string }).projectId = project.projectId;
 });
 

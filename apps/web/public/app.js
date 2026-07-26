@@ -1084,3 +1084,13 @@ const GUIDE_DEEP_LINK = new URLSearchParams(location.search).get("guide");
     loadOverview();
   }
 })();
+
+// Delegated navigation for [data-href] buttons. These used to be inline
+// onclick="location.href=..." attributes, which force `script-src
+// 'unsafe-inline'` in the CSP and thereby disable the single control that most
+// reliably contains a stored-XSS bug. The dashboard renders attacker-authored
+// prompt-injection payloads, so that trade was not worth one line of HTML.
+document.addEventListener("click", (e) => {
+  const el = e.target.closest("[data-href]");
+  if (el) location.href = el.dataset.href;
+});

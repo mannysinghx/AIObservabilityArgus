@@ -3,21 +3,30 @@ import { dirname, join } from "node:path";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import Fastify from "fastify";
-import type { FastifyReply } from "fastify";
+import type { FastifyReply, FastifyRequest } from "fastify";
 import fastifyStatic from "@fastify/static";
-import { config } from "@argus/shared";
+import { config, rateLimit, LIMITS } from "@argus/shared";
 import * as Q from "./queries.js";
 import * as Onboarding from "./onboarding.js";
 import * as Auth from "./auth.js";
 import * as Admin from "./admin.js";
 import * as Audit from "./audit.js";
 import * as Settings from "./settings.js";
+import { applySecurityHeaders } from "./headers.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, "..", "public");
 const port = Number(process.env.PORT ?? process.env.WEB_PORT ?? 3002);
 
-const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? "info" } });
+const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? "info" }, trustProxy: true });
+
+// Security headers on every response. Registered first so it also covers static
+// assets, 404s, and error replies — a header set only on the happy path is a
+// header set on the responses that were never the problem. The /demo route
+// re-applies it with its own script hash.
+app.addHook("onRequest", async (req, reply) => {
+  applySecurityHeaders(req, reply);
+});
 
 // ---------------------------------------------------------------- asset versioning
 // The dashboard is several cooperating files (app.js needs glossary.js; both
@@ -76,8 +85,23 @@ for (const page of HTML_PAGES) {
 const DEMO_ENABLED = process.env.DEMO_ENABLED !== "0";
 let demoHtml: string | null = null;
 try { demoHtml = readFileSync(join(__dirname, "..", "demo", "index.html"), "utf8"); } catch { /* absent — /demo 404s */ }
-app.get("/demo", async (_req, reply) => {
+
+// The demo page carries one inline <script> (a cosmetic count-up). Rather than
+// relax script-src to 'unsafe-inline' — which would apply to every page that
+// renders customer trace content — hash it at boot and allow exactly that
+// script, on exactly this route.
+const demoScriptHashes: string[] = (() => {
+  if (!demoHtml) return [];
+  const hashes: string[] = [];
+  for (const m of demoHtml.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)) {
+    hashes.push("sha256-" + createHash("sha256").update(m[1], "utf8").digest("base64"));
+  }
+  return hashes;
+})();
+
+app.get("/demo", async (req, reply) => {
   if (!DEMO_ENABLED || demoHtml === null) return reply.callNotFound();
+  applySecurityHeaders(req, reply, { scriptHashes: demoScriptHashes });
   return reply.header("content-type", "text/html; charset=utf-8").header("cache-control", "no-cache").send(demoHtml);
 });
 
@@ -107,13 +131,58 @@ app.get("/health", async () => ({ status: (await Q.health()) ? "ok" : "degraded"
 // and require one for everything except the auth endpoints themselves. Static
 // assets (login.html, the dashboard shell, JS/CSS) stay public — all *data*
 // lives behind /api and is gated here.
+// ---------------- rate limiting ----------------
+// Unauthenticated auth endpoints are the ones an attacker can hammer for free:
+// login is credential stuffing, forgot/resend are an outbound-email cannon paid
+// for by us, and reset is token guessing. Limits are keyed by client IP, and
+// login is *additionally* keyed by the email being tried so that rotating IPs
+// still can't grind a single account.
+//
+// Returning 429 before the handler means we never touch Postgres or the mailer
+// for a request we've already decided to refuse.
+async function limited(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  scope: string,
+  policy: { limit: number; windowMs: number },
+  extra?: string,
+): Promise<boolean> {
+  const id = extra ? `${scope}:${extra}` : `${scope}:${req.ip}`;
+  const r = await rateLimit(id, policy.limit, policy.windowMs);
+  if (r.allowed) return false;
+  reply
+    .code(429)
+    .header("retry-after", String(Math.ceil(r.resetMs / 1000)))
+    .send({ error: "Too many requests. Please wait and try again." });
+  return true;
+}
+
+/** Per-path limit policy for the public auth endpoints. */
+async function authRateLimited(req: FastifyRequest, reply: FastifyReply, path: string): Promise<boolean> {
+  if (path === "/api/auth/login") {
+    const email = String((req.body as { email?: string } | undefined)?.email ?? "").trim().toLowerCase();
+    if (await limited(req, reply, "login-ip", LIMITS.login)) return true;
+    if (email && (await limited(req, reply, "login-email", LIMITS.login, email))) return true;
+    return false;
+  }
+  if (path === "/api/auth/signup") return limited(req, reply, "signup", LIMITS.signup);
+  if (path === "/api/auth/forgot" || path === "/api/auth/resend")
+    return limited(req, reply, "email-trigger", LIMITS.emailTrigger);
+  if (path === "/api/auth/reset" || path === "/api/auth/verify")
+    return limited(req, reply, "reset-submit", LIMITS.resetSubmit);
+  return false;
+}
+
 app.decorateRequest("user", null);
 app.addHook("preHandler", async (req, reply) => {
   const path = req.url.split("?")[0];
   if (!path.startsWith("/api/")) return;
   const token = Auth.parseSessionCookie(req.headers.cookie);
   asUser(req).user = await Auth.sessionUser(token);
-  if (path.startsWith("/api/auth/")) return; // these manage their own session
+  if (path.startsWith("/api/auth/")) {
+    if (await authRateLimited(req, reply, path)) return;
+    return; // these manage their own session
+  }
   const u = asUser(req).user;
   if (!u) {
     reply.code(401).send({ error: "authentication required" });
@@ -123,18 +192,41 @@ app.addHook("preHandler", async (req, reply) => {
   // default (verification is a nudge); set REQUIRE_EMAIL_VERIFICATION=1 to enforce.
   if (process.env.REQUIRE_EMAIL_VERIFICATION === "1" && !u.emailVerified) {
     reply.code(403).send({ error: "email not verified" });
+    return;
   }
+  // Signed-in traffic is limited per user, not per IP: an office behind one NAT
+  // is many users, and a stolen session is one user across many IPs.
+  await limited(req, reply, "api-user", LIMITS.api, u.id);
 });
 
 // ---------------- auth routes ----------------
-app.post<{ Body: { email?: string; password?: string; name?: string; company?: string } }>(
+// Was this request delivered over TLS? Decides the cookie's Secure flag —
+// setting it on a plain-HTTP connection makes the browser drop the cookie and
+// the user can never stay signed in.
+function secureReq(req: FastifyRequest): boolean {
+  if (req.protocol === "https") return true;
+  const xf = req.headers["x-forwarded-proto"];
+  const proto = Array.isArray(xf) ? xf[0] : xf;
+  return (proto ?? "").split(",")[0].trim() === "https";
+}
+
+// What the login page needs to render itself correctly (whether to show the
+// signup form, and whether to ask for a setup token). Public by necessity, and
+// it reveals only configuration the operator chose, never account existence.
+app.get("/api/auth/policy", async () => Auth.signupPolicy());
+
+app.post<{ Body: { email?: string; password?: string; name?: string; company?: string; bootstrapToken?: string } }>(
   "/api/auth/signup",
   async (req, reply) => {
-    const { email, password, name, company } = req.body || {};
-    const r = await Auth.signup(email || "", password || "", name || "", company || "");
-    if ("error" in r) { reply.code(400).send(r); return; }
-    reply.header("set-cookie", Auth.sessionCookie(r.token));
-    void Audit.record("user.signup", { actor: r.user.id, actorEmail: r.user.email, ip: (req as { ip?: string }).ip });
+    const { email, password, name, company, bootstrapToken } = req.body || {};
+    const r = await Auth.signup(email || "", password || "", name || "", company || "", bootstrapToken || "");
+    if ("error" in r) {
+      void Audit.record("user.signup_rejected", { actorEmail: email, ip: req.ip, metadata: { reason: r.error } });
+      reply.code(400).send(r);
+      return;
+    }
+    reply.header("set-cookie", Auth.sessionCookie(r.token, secureReq(req)));
+    void Audit.record("user.signup", { actor: r.user.id, actorEmail: r.user.email, ip: req.ip });
     return { user: r.user };
   },
 );
@@ -142,14 +234,23 @@ app.post<{ Body: { email?: string; password?: string; name?: string; company?: s
 app.post<{ Body: { email?: string; password?: string } }>("/api/auth/login", async (req, reply) => {
   const { email, password } = req.body || {};
   const r = await Auth.login(email || "", password || "");
-  if ("error" in r) { reply.code(401).send(r); return; }
-  reply.header("set-cookie", Auth.sessionCookie(r.token));
+  if ("error" in r) {
+    // Failed logins are the signal that matters in an audit trail — a
+    // successful-only log tells you nothing about the attempt that preceded it.
+    void Audit.record("user.login_failed", { actorEmail: String(email || "").toLowerCase(), ip: req.ip });
+    reply.code(401).send(r);
+    return;
+  }
+  reply.header("set-cookie", Auth.sessionCookie(r.token, secureReq(req)));
+  void Audit.record("user.login", { actor: r.user.id, actorEmail: r.user.email, ip: req.ip });
   return { user: r.user };
 });
 
 app.post("/api/auth/logout", async (req, reply) => {
+  const u = userOf(req);
   await Auth.logout(Auth.parseSessionCookie(req.headers.cookie));
-  reply.header("set-cookie", Auth.clearCookie());
+  reply.header("set-cookie", Auth.clearCookie(secureReq(req)));
+  if (u) void Audit.record("user.logout", { actor: u.id, actorEmail: u.email, ip: req.ip });
   return { ok: true };
 });
 

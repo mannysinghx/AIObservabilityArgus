@@ -19,7 +19,10 @@ l2 = [
 dev = [
     "pytest>=8.0",
     "httpx>=0.27",
-    "ruff>=0.4",
+    # Pinned to a minor range: ruff adds rules in every release, so an open
+    # `>=` bound means CI can turn red from a dependency resolving forward
+    # rather than from anything anyone changed. Bump this deliberately.
+    "ruff>=0.16,<0.17",
 ]
 
 [build-system]

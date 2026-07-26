@@ -54,10 +54,45 @@ function validEmail(e: string): boolean {
   return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e);
 }
 
+// ---------------- signup policy ----------------
+// Who is allowed to create an account, and who gets the keys to the platform.
+//
+//   ARGUS_SIGNUP_MODE = open (default) | invite_only | closed
+//   ARGUS_BOOTSTRAP_TOKEN = <secret>
+//
+// The first account to exist becomes the platform operator (super-admin over
+// every tenant). On a deployment reachable from the internet that is a race:
+// whoever finds the URL between `deploy` and `you signing up` owns the install.
+// Setting ARGUS_BOOTSTRAP_TOKEN closes the race — the first signup must present
+// it, and until someone does, there is no account at all.
+//
+// `invite_only` is the steady state for a hosted deployment: after bootstrap,
+// accounts are created only for addresses someone already invited.
+export type SignupMode = "open" | "invite_only" | "closed";
+
+export function signupMode(): SignupMode {
+  const m = (process.env.ARGUS_SIGNUP_MODE || "open").trim().toLowerCase();
+  return m === "invite_only" || m === "closed" ? m : "open";
+}
+
+/** Public description of the signup policy, for the login/signup UI. */
+export function signupPolicy(): { mode: SignupMode; bootstrapRequired: boolean } {
+  return { mode: signupMode(), bootstrapRequired: !!process.env.ARGUS_BOOTSTRAP_TOKEN };
+}
+
+function bootstrapTokenOk(presented: string): boolean {
+  const expected = process.env.ARGUS_BOOTSTRAP_TOKEN || "";
+  if (!expected) return true; // not configured — nothing to check
+  const a = Buffer.from(String(presented || ""), "utf8");
+  const b = Buffer.from(expected, "utf8");
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 /**
  * Create an account. The first user to sign up becomes the platform operator
- * (super-admin). Every account — including the first — gets an org of its own
- * from the company name, and membership of nothing else.
+ * (super-admin), subject to ARGUS_BOOTSTRAP_TOKEN above. Every account —
+ * including the first — gets an org of its own from the company name, and
+ * membership of nothing else.
  *
  * The first account used to also be granted `owner` membership of every
  * organization that already existed. That silently made one customer a member
@@ -70,6 +105,7 @@ export async function signup(
   password: string,
   name: string,
   companyName: string,
+  bootstrapToken = "",
 ): Promise<{ token: string; user: SessionUser } | AuthError> {
   const email = String(emailRaw || "").trim().toLowerCase();
   if (!validEmail(email)) return { error: "Enter a valid email address." };
@@ -86,6 +122,33 @@ export async function signup(
     }
 
     const isFirst = (await client.query("SELECT 1 FROM users LIMIT 1")).rowCount === 0;
+
+    // Policy gate. The first account is exempt from signup *mode* (otherwise a
+    // closed deployment could never be bootstrapped) but is the only account
+    // subject to the bootstrap token.
+    if (isFirst) {
+      if (!bootstrapTokenOk(bootstrapToken)) {
+        await client.query("ROLLBACK");
+        return { error: "A setup token is required to create the first account." };
+      }
+    } else {
+      const mode = signupMode();
+      if (mode === "closed") {
+        await client.query("ROLLBACK");
+        return { error: "Sign-ups are closed on this deployment. Ask an administrator for an invitation." };
+      }
+      if (mode === "invite_only") {
+        const invited = await client.query(
+          "SELECT 1 FROM invitations WHERE lower(email) = lower($1) AND accepted_at IS NULL LIMIT 1",
+          [email],
+        );
+        if (!invited.rowCount) {
+          await client.query("ROLLBACK");
+          return { error: "This deployment is invite-only. Ask an administrator to invite your email address." };
+        }
+      }
+    }
+
     const nm = String(name || "").trim().slice(0, 120);
 
     // The platform operator (first account) is trusted; if no mailer is
@@ -124,7 +187,15 @@ export async function signup(
       ]);
     }
 
-    await activateInvites(client, userId, email); // join any orgs they were invited to
+    // Join any orgs they were invited to — but ONLY once we know the address is
+    // really theirs. An invitation is a grant of access to another tenant's
+    // data, keyed on an email address, so activating it for an unproven address
+    // means anyone who signs up as victim@company.com inherits every invite
+    // sent to that person. When no mailer is configured `verified` is already
+    // true (there is no way to prove anything, and a self-hoster shouldn't be
+    // locked out of their own invites), so this doesn't change single-tenant
+    // deployments — it closes the hole on the ones that can actually verify.
+    if (verified) await activateInvites(client, userId, email);
 
     let verifyLink: string | null = null;
     if (!verified) {
@@ -161,7 +232,8 @@ export async function login(
   if (!u || !verifyPassword(password, u.password_hash)) {
     return { error: "Incorrect email or password." };
   }
-  await activateInvites(pool, u.id, u.email); // pick up invites created since last login
+  // Pick up invites created since last login — verified addresses only (see signup).
+  if (u.email_verified) await activateInvites(pool, u.id, u.email);
   const token = await createSession(pool, u.id);
   return { token, user: { id: u.id, email: u.email, name: u.name, emailVerified: u.email_verified, isPlatformAdmin: u.is_platform_admin } };
 }
@@ -213,6 +285,11 @@ export async function verifyEmailToken(token: string): Promise<{ ok: true } | Au
   if (!row) return { error: "This verification link is invalid or has expired." };
   await pool.query("UPDATE users SET email_verified = true WHERE id = $1", [row.user_id]);
   await pool.query("DELETE FROM email_verifications WHERE user_id = $1", [row.user_id]);
+  // Verification is the moment an invite becomes safe to honour, so this is
+  // where pending invites are redeemed. Without it, gating signup/login on
+  // `email_verified` would leave an invited user permanently outside the org.
+  const who = await pool.query<{ email: string }>("SELECT email FROM users WHERE id = $1", [row.user_id]);
+  if (who.rows[0]) await activateInvites(pool, row.user_id, who.rows[0].email);
   return { ok: true };
 }
 
@@ -447,11 +524,24 @@ export function parseSessionCookie(cookieHeader: string | undefined): string | u
   return undefined;
 }
 
-export function sessionCookie(token: string): string {
-  const maxAge = SESSION_TTL_DAYS * 24 * 3600;
-  return `${SESSION_COOKIE}=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${maxAge}`;
+/**
+ * `Secure` is emitted only for connections that are actually TLS. It used to be
+ * unconditional, which reads as "more secure" but means the browser silently
+ * discards the cookie over plain HTTP — so local development and any
+ * self-hosted HTTP deployment could never stay signed in, with no error to
+ * explain why. Over HTTPS the flag is still always set, which is the case that
+ * matters; `ARGUS_FORCE_SECURE_COOKIE=1` pins it on for a proxy we can't detect.
+ */
+function cookieAttrs(secure: boolean): string {
+  const forced = process.env.ARGUS_FORCE_SECURE_COOKIE === "1";
+  return `HttpOnly; ${secure || forced ? "Secure; " : ""}SameSite=Lax; Path=/`;
 }
 
-export function clearCookie(): string {
-  return `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`;
+export function sessionCookie(token: string, secure = true): string {
+  const maxAge = SESSION_TTL_DAYS * 24 * 3600;
+  return `${SESSION_COOKIE}=${token}; ${cookieAttrs(secure)}; Max-Age=${maxAge}`;
+}
+
+export function clearCookie(secure = true): string {
+  return `${SESSION_COOKIE}=; ${cookieAttrs(secure)}; Max-Age=0`;
 }

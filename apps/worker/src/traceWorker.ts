@@ -1,5 +1,6 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import {
+  contentSha256,
   insertRows,
   toChDateTime,
   type StreamEvent,
@@ -12,18 +13,6 @@ const PREVIEW_LIMIT = 4000;
 
 function preview(s: string): string {
   return s.length > PREVIEW_LIMIT ? s.slice(0, PREVIEW_LIMIT) : s;
-}
-
-function sha256(s: string): string {
-  return createHash("sha256").update(s).digest("hex");
-}
-
-// The analyzable body per span type — matches the detection client so the
-// stored content_sha256 corresponds to what detection actually scanned (used
-// later for cross-trace poisoned-document correlation).
-function contentOf(o: ObservationInput): string {
-  if (o.type === "generation" || o.type === "retrieval") return o.output || o.input;
-  return [o.input, o.output].filter(Boolean).join("\n");
 }
 
 /**
@@ -86,7 +75,7 @@ export async function handleTraceBatch(events: StreamEvent[]) {
         output_preview: preview(output),
         input_full: input,
         output_full: output,
-        content_sha256: sha256(contentOf(o)),
+        content_sha256: contentSha256(o),
         taint,
         taint_source: o.taintSource ?? "",
         taint_influenced: 0,

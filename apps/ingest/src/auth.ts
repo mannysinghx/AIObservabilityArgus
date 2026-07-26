@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import pg from "pg";
-import { config } from "@argus/shared";
+import { config, subscribeKeyRevoked } from "@argus/shared";
 
 const pool = new pg.Pool({ connectionString: config.databaseUrl, max: 4 });
 
@@ -12,6 +12,21 @@ export interface AuthedProject {
 // Small in-process cache so we don't hit Postgres on every ingest request.
 const cache = new Map<string, { project: AuthedProject; expires: number }>();
 const TTL_MS = 60_000;
+
+// Revocation must not wait for the TTL. When the dashboard revokes a key it
+// announces the affected project and we drop those entries immediately; the
+// next request for that project re-reads Postgres and finds the key gone.
+// Entries are dropped by project rather than by key hash because the cache is
+// keyed by credential, and the credential is precisely what we no longer have.
+subscribeKeyRevoked((projectId) => {
+  if (!projectId) {
+    cache.clear();
+    return;
+  }
+  for (const [k, v] of cache) {
+    if (v.project.projectId === projectId) cache.delete(k);
+  }
+});
 
 function sha256(s: string): string {
   return createHash("sha256").update(s).digest("hex");

@@ -1,9 +1,9 @@
 """Unit tests for the L1 heuristic engine and taint classifier."""
 from __future__ import annotations
 
+from argus_detection import taint
 from argus_detection.layers import heuristics
 from argus_detection.models import Observation, ObservationType, TaintClass
-from argus_detection import taint
 
 
 def _scan(content: str, t: TaintClass = TaintClass.user):
@@ -34,7 +34,7 @@ def test_indirect_only_fires_on_untrusted():
 
 
 def test_invisible_unicode_detected():
-    r = _scan("hello​world ignore​this")
+    r = _scan("hello\u200bworld ignore\u200bthis")
     assert "R-OBF-001" in {m.rule_id for m in r.matches}
 
 

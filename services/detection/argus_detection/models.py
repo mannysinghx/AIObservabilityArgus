@@ -7,7 +7,6 @@ Python service independently testable.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -79,7 +78,7 @@ class Observation(BaseModel):
     # for a tool span the tool output; for a generation the completion; etc.
     content: str = ""
     role: str = ""  # user | assistant | system | tool (when known)
-    taint: Optional[TaintClass] = None  # None => infer from type + overrides
+    taint: TaintClass | None = None  # None => infer from type + overrides
     taint_source: str = ""
     model: str = ""
     # Free-form attributes carried from the trace (gen_ai.*, argus.*).

@@ -9,6 +9,7 @@ network surface.
 """
 from __future__ import annotations
 
+from . import taint as taint_mod
 from .layers import classifiers, heuristics, trace_analysis
 from .models import (
     Finding,
@@ -17,7 +18,6 @@ from .models import (
     TraceScanRequest,
     TraceScanResponse,
 )
-from . import taint as taint_mod
 from .scoring import combine
 
 # L2 runs when L1 score clears this even for trusted content (an escalation).

@@ -10,7 +10,9 @@
   "scripts": {
     "ingest": "npm --workspace @argus/ingest run dev",
     "worker": "npm --workspace @argus/worker run dev",
-    "typecheck": "tsc -b --pretty"
+    "typecheck": "tsc -b --pretty",
+    "test": "tsx --test tests/*.test.ts",
+    "test:isolation": "tsx --test tests/integration/*.test.ts"
   },
   "engines": {
     "node": ">=20"

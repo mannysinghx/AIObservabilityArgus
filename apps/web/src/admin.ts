@@ -1,4 +1,4 @@
-import { ch } from "@argus/shared";
+import { ch, publishKeyRevoked } from "@argus/shared";
 import { pool } from "./db.js";
 import { listProjectsWithStats } from "./onboarding.js";
 
@@ -156,5 +156,9 @@ export async function deleteOrg(orgId: string): Promise<{ ok: true; projectsPurg
     }
   }
   await pool.query("DELETE FROM organizations WHERE id = $1", [orgId]);
+  // The cascade removed the api_keys rows, but ingest replicas may still be
+  // holding cached lookups for them — a deleted customer must stop being able
+  // to write immediately, not when a cache entry happens to expire.
+  for (const id of projectIds) await publishKeyRevoked(id);
   return { ok: true, projectsPurged: projectIds.length };
 }

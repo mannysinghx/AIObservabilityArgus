@@ -15,9 +15,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-
-from argus_detection.models import Observation, ObservationType, ScanRequest, Severity
-from argus_detection.models import SEVERITY_ORDER
+from argus_detection.models import (
+    SEVERITY_ORDER,
+    Observation,
+    ObservationType,
+    ScanRequest,
+    Severity,
+)
 from argus_detection.pipeline import scan_observation
 
 _CORPUS = Path(__file__).resolve().parent.parent / "argus_detection" / "corpus" / "span_corpus.jsonl"

@@ -314,6 +314,39 @@
           <button class="btn btn-primary" id="saveSettingsBtn" type="button" style="padding:8px 16px;font-size:13px">Save settings</button>
           <span id="settingsSaveNote" class="dim" style="font-size:12px"></span>
         </div>
+
+        <!-- Data governance. Separate card, owner-only, and visually set apart
+             from the tuning above because everything here destroys data. -->
+        <div class="card" id="governanceCard" style="margin-top:calc(var(--u)*4);border-color:var(--sev-high)">
+          <div class="card-head"><span class="card-title">Data retention &amp; erasure</span><span class="card-hint">owners only · irreversible</span></div>
+          <div class="pad" style="display:grid;gap:calc(var(--u)*3.5);padding:calc(var(--u)*3.2)">
+            <div class="set-row">
+              <div class="set-label"><label for="setRetention">Keep data for</label><span class="set-hint">
+                Traces, spans, security events, eval scores and the raw ingest archive are deleted permanently once they pass this age.
+                Saving applies the new window <b>immediately</b> — if you shorten it, data outside it is gone straight away.
+                Set to <b>0</b> to keep everything forever.</span></div>
+              <div class="set-control" style="display:flex;align-items:center;gap:10px">
+                <input id="setRetention" type="number" min="0" max="3650" step="1" value="30" style="width:110px;font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink)">
+                <span class="dim" style="font-size:12px">days</span>
+                <button class="btn" id="saveRetentionBtn" type="button" style="padding:6px 12px;font-size:12px">Apply</button>
+                <span id="retentionNote" class="dim" style="font-size:12px"></span>
+              </div>
+            </div>
+
+            <div class="set-row">
+              <div class="set-label"><label for="eraseUserId">Erase one person's data</label><span class="set-hint">
+                For a deletion request under GDPR, CCPA or similar. Enter the value your app sends as <span class="mono">userId</span>.
+                Every trace for that person — prompts, completions, tool calls, security events — is deleted across all tables.
+                Check the count before you confirm; a mistyped id matches nothing and looks the same as success.</span></div>
+              <div class="set-control" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                <input id="eraseUserId" type="text" placeholder="user id" style="min-width:200px;font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink)">
+                <button class="btn" id="previewEraseBtn" type="button" style="padding:6px 12px;font-size:12px">Check</button>
+                <button class="btn" id="eraseBtn" type="button" style="padding:6px 12px;font-size:12px;color:var(--sev-critical);display:none">Erase permanently</button>
+                <span id="eraseNote" class="dim" style="font-size:12px"></span>
+              </div>
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- PLATFORM ADMIN: overview -->

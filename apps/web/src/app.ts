@@ -13,6 +13,7 @@ import * as Admin from "./admin.js";
 import * as Audit from "./audit.js";
 import * as Settings from "./settings.js";
 import * as Canaries from "./canaryAdmin.js";
+import * as Governance from "./dataGovernance.js";
 import { applySecurityHeaders } from "./headers.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -491,6 +492,62 @@ export async function buildApp() {
       audit(req, "settings.updated", { orgId: g.orgId, targetType: "project", target: project, metadata: { version: r.version } });
       return r;
     } catch (err) { app.log.error({ err }, "settings write failed"); reply.code(500).send({ error: String(err) }); }
+  });
+
+  // ---------------- data governance (view: member+, change: owner) ----------------
+  // Retention and erasure are destructive and irreversible, so they sit above
+  // the detection settings in required role: an admin can tune sampling, only an
+  // owner can shorten how long a customer's data is kept or erase a person.
+  app.get("/api/retention", async (req, reply) => {
+    const project = (req.query as ScopedQuery).project;
+    const g = await roleGate(req, reply, project, "member");
+    if (!g) return;
+    try { return await Governance.getRetention(project!); }
+    catch (err) { app.log.error({ err }, "retention read failed"); reply.code(503).send({ error: "query failed" }); }
+  });
+
+  app.put<{ Body: { project?: string; retentionDays?: number } }>("/api/retention", async (req, reply) => {
+    const project = req.body?.project;
+    const g = await roleGate(req, reply, project, "owner");
+    if (!g) return;
+    try {
+      const r = await Governance.setRetention(project!, Number(req.body?.retentionDays));
+      if ("error" in r) { reply.code(400).send(r); return; }
+      audit(req, "retention.changed", {
+        orgId: g.orgId, targetType: "project", target: project,
+        metadata: { retentionDays: r.retentionDays },
+      });
+      // Apply immediately: shortening a window is something people do because
+      // they want data gone now, not within the hour.
+      const swept = await Governance.applyRetentionNow(project!);
+      return { ...r, swept: swept.tables };
+    } catch (err) { app.log.error({ err }, "retention write failed"); reply.code(500).send({ error: "could not update retention" }); }
+  });
+
+  // Right to erasure. GET previews the blast radius, POST performs it.
+  app.get<{ Querystring: ScopedQuery & { userId?: string } }>("/api/erasure/preview", async (req, reply) => {
+    const g = await roleGate(req, reply, req.query.project, "owner");
+    if (!g) return;
+    try { return await Governance.previewErasure(req.query.project!, req.query.userId || ""); }
+    catch (err) { app.log.error({ err }, "erasure preview failed"); reply.code(503).send({ error: "query failed" }); }
+  });
+
+  app.post<{ Body: { project?: string; userId?: string } }>("/api/erasure", async (req, reply) => {
+    const project = req.body?.project;
+    const g = await roleGate(req, reply, project, "owner");
+    if (!g) return;
+    try {
+      const r = await Governance.eraseUser(project!, req.body?.userId || "");
+      if ("error" in r) { reply.code(400).send(r); return; }
+      // The audit entry is the evidence that the request was honoured, and it
+      // deliberately records the subject id: the whole point is to be able to
+      // show an auditor what was erased and when.
+      audit(req, "data.erased", {
+        orgId: g.orgId, targetType: "project", target: project,
+        metadata: { subject: r.subject, tracesMatched: r.tracesMatched },
+      });
+      return r;
+    } catch (err) { app.log.error({ err }, "erasure failed"); reply.code(500).send({ error: "erasure failed" }); }
   });
 
   // ---------------- canaries (view: member+, manage: admin+) ----------------

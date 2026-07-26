@@ -789,6 +789,81 @@ async function revokeCanary(id) {
   } catch (e) { banner("Revoke failed: " + e.message); }
 }
 
+// ---------- Data governance (retention + erasure) ----------
+// Owner-only, and every control here destroys data, so the flow is: show the
+// current state, make the consequence explicit, require a second action.
+async function loadGovernance() {
+  const card = $("#governanceCard");
+  if (!card) return;
+  const isOwner = (ROLE_RANK[PROJECT_ROLE] ?? -1) >= 3;
+  card.style.display = isOwner ? "" : "none";
+  if (!isOwner) return;
+  try {
+    const r = await api("/api/retention");
+    $("#setRetention").value = r.retentionDays;
+    $("#retentionNote").textContent = r.keepForever ? "keeping everything forever" : "";
+  } catch { /* the settings page still works without this */ }
+}
+
+$("#saveRetentionBtn")?.addEventListener("click", async () => {
+  const days = Number($("#setRetention").value);
+  const msg = days <= 0
+    ? "Keep all data forever? Nothing will be deleted automatically."
+    : `Keep data for ${days} days? Anything older than that will be deleted permanently, starting now.`;
+  if (!confirm(msg)) return;
+  const note = $("#retentionNote");
+  note.textContent = "applying…";
+  try {
+    const res = await fetch("/api/retention", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ project: PROJECT, retentionDays: days }),
+    });
+    const d = await res.json().catch(() => ({}));
+    note.textContent = res.ok
+      ? (d.keepForever ? "keeping everything forever" : `applied — keeping ${d.retentionDays} days`)
+      : (d.error || "could not update");
+  } catch (e) { note.textContent = "could not update: " + e.message; }
+});
+
+$("#previewEraseBtn")?.addEventListener("click", async () => {
+  const userId = $("#eraseUserId").value.trim();
+  const note = $("#eraseNote"), btn = $("#eraseBtn");
+  btn.style.display = "none";
+  if (!userId) { note.textContent = "enter a user id first"; return; }
+  note.textContent = "checking…";
+  try {
+    const d = await api(`/api/erasure/preview?userId=${encodeURIComponent(userId)}`);
+    if (!d.traces) {
+      // The important case: no match looks exactly like a successful erasure
+      // unless we say so before anything is deleted.
+      note.textContent = "no traces match that user id — check the value your app sends";
+      return;
+    }
+    note.textContent = `${d.traces} trace${d.traces === 1 ? "" : "s"} will be permanently deleted`;
+    btn.style.display = "";
+  } catch (e) { note.textContent = "check failed: " + e.message; }
+});
+
+$("#eraseBtn")?.addEventListener("click", async () => {
+  const userId = $("#eraseUserId").value.trim();
+  if (!confirm(`Permanently erase all data for "${userId}"? This cannot be undone.`)) return;
+  const note = $("#eraseNote");
+  note.textContent = "erasing…";
+  try {
+    const res = await fetch("/api/erasure", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ project: PROJECT, userId }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { note.textContent = d.error || "erasure failed"; return; }
+    note.textContent = `erased ${d.tracesMatched} trace(s) — recorded in the audit log`;
+    $("#eraseBtn").style.display = "none";
+    $("#eraseUserId").value = "";
+  } catch (e) { note.textContent = "erasure failed: " + e.message; }
+});
+
 // ---------- Audit log ----------
 const ACTION_LABELS = {
   "user.signup": "Signed up",
@@ -938,6 +1013,7 @@ async function loadSettings() {
     SETTINGS_CFG = d.config;
     const canEdit = (ROLE_RANK[PROJECT_ROLE] ?? -1) >= 2;
     fillSettings(d.config, canEdit);
+    loadGovernance(); // retention + erasure live on this page, owner-gated
     const who = d.updatedBy ? ` · last changed by ${esc(d.updatedBy)}` : "";
     $("#settingsSub").innerHTML = (canEdit ? "Changes apply within ~30s — no redeploy" : "Read-only — admin role required to change") + who;
     $("#saveSettingsBtn").style.display = canEdit ? "" : "none";

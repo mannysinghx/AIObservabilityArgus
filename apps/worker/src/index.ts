@@ -2,6 +2,7 @@ import { GROUP_TRACE, GROUP_SECURITY } from "@argus/shared";
 import { runConsumer } from "./consumer.js";
 import { handleTraceBatch } from "./traceWorker.js";
 import { handleSecurityBatch } from "./securityWorker.js";
+import { startRetentionJob } from "./retentionJob.js";
 
 /**
  * Entry point runs both consumer groups in one process for local/dev. In
@@ -11,6 +12,7 @@ const consumer = process.env.HOSTNAME ?? `w-${process.pid}`;
 
 async function main() {
   console.log("argus-worker starting (trace + security consumers)");
+  startRetentionJob();
   await Promise.all([
     runConsumer(GROUP_TRACE, consumer, handleTraceBatch),
     runConsumer(GROUP_SECURITY, consumer, handleSecurityBatch),

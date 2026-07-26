@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { ch, DEFAULT_DETECTION_CONFIG, publishKeyRevoked } from "@argus/shared";
 import { pool, sha256 } from "./db.js";
+import { safeProjectId } from "./ids.js";
 
 /** Single write-only ingest key — the zero-config credential pasted into init(). */
 function genToken(): string {
@@ -185,7 +186,7 @@ export interface ApiKeyRow {
 
 /** List a project's API keys — never the secret (only its hash is stored). */
 export async function listKeys(projectId: string): Promise<ApiKeyRow[]> {
-  const safe = String(projectId || "").replace(/[^a-zA-Z0-9-]/g, "");
+  const safe = safeProjectId(projectId);
   const { rows } = await pool.query<{ id: string; public_key: string; created_at: Date; last_used_at: Date | null }>(
     `SELECT id, public_key, created_at, last_used_at FROM api_keys WHERE project_id = $1 ORDER BY created_at DESC`,
     [safe],
@@ -200,7 +201,7 @@ export async function listKeys(projectId: string): Promise<ApiKeyRow[]> {
 
 /** Mint a new key for a project. The token/secret are returned ONCE. */
 export async function createKey(projectId: string): Promise<{ id: string; token: string; publicKey: string; secretKey: string }> {
-  const safe = String(projectId || "").replace(/[^a-zA-Z0-9-]/g, "");
+  const safe = safeProjectId(projectId);
   const publicKey = genKey("pk");
   const secretKey = genKey("sk");
   const token = genToken();
@@ -213,7 +214,7 @@ export async function createKey(projectId: string): Promise<{ id: string; token:
 
 /** Revoke a key. Refuses to remove the last key so a project can't be orphaned. */
 export async function revokeKey(projectId: string, keyId: string): Promise<{ ok: true } | { error: string }> {
-  const safeP = String(projectId || "").replace(/[^a-zA-Z0-9-]/g, "");
+  const safeP = safeProjectId(projectId);
   const safeK = String(keyId || "").replace(/[^a-zA-Z0-9-]/g, "");
   const count = await pool.query("SELECT count(*)::int AS n FROM api_keys WHERE project_id = $1", [safeP]);
   if ((count.rows[0] as { n: number }).n <= 1) return { error: "Can't revoke the last key — create a new one first." };
@@ -234,7 +235,7 @@ export interface ProjectMeta {
 
 /** Resolve one project's human-readable name + owning org, for the header. */
 export async function getProjectMeta(id: string): Promise<ProjectMeta | null> {
-  const safe = String(id || "").replace(/[^a-zA-Z0-9-]/g, "");
+  const safe = safeProjectId(id);
   if (!safe) return null;
   const { rows } = await pool.query<{
     project_id: string; project_name: string; org_id: string; org_name: string;
@@ -260,7 +261,7 @@ export interface ConnectionStatus {
 
 /** Has this project received any traces yet? Polled by the onboarding UI. */
 export async function checkConnectionStatus(projectId: string): Promise<ConnectionStatus> {
-  const safe = String(projectId || "").replace(/[^a-zA-Z0-9_-]/g, "");
+  const safe = safeProjectId(projectId);
   if (!safe) return { projectId: "", connected: false, traceCount: 0, eventCount: 0, lastSeenAt: null };
 
   const rs = await ch().query({

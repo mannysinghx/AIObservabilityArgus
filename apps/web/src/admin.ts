@@ -1,6 +1,7 @@
 import { ch, publishKeyRevoked } from "@argus/shared";
 import { pool } from "./db.js";
 import { listProjectsWithStats } from "./onboarding.js";
+import { safeProjectId } from "./ids.js";
 
 // Platform-operator (super-admin) queries and mutations — cross-tenant. Every
 // route that calls these is gated to platform admins in server.ts.
@@ -146,7 +147,7 @@ export async function renameOrg(orgId: string, name: string): Promise<{ ok: true
  *  (which cascades projects, keys, configs, memberships). Irreversible. */
 export async function deleteOrg(orgId: string): Promise<{ ok: true; projectsPurged: number }> {
   const { rows } = await pool.query<{ id: string }>("SELECT id FROM projects WHERE org_id = $1", [orgId]);
-  const projectIds = rows.map((r) => r.id.replace(/[^a-zA-Z0-9-]/g, ""));
+  const projectIds = rows.map((r) => safeProjectId(r.id)).filter(Boolean);
   if (projectIds.length) {
     const list = projectIds.map((id) => `'${id}'`).join(",");
     // `scores` is tenant data too — it was omitted here, so a deleted customer's

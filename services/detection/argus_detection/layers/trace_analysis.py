@@ -21,8 +21,10 @@ from __future__ import annotations
 
 import re
 
+from .. import canary as canary_mod
 from .. import taint as taint_mod
 from ..models import (
+    CanaryRef,
     Category,
     Finding,
     Observation,
@@ -63,15 +65,32 @@ def _is_side_effect(obs: Observation) -> bool:
     return obs.type == ObservationType.tool and any(h in name for h in _SIDE_EFFECT_HINTS)
 
 
+def _is_egress(obs: Observation, taint: TaintClass) -> bool:
+    """Could content in this span have left the system?
+
+    Model output and tool spans, both of which are places a planted marker has
+    no legitimate reason to appear. Retrieval spans are deliberately excluded:
+    a canary *arriving* from the corpus it was planted in is the system working
+    as designed, and alerting on it would make the feature unusable for the main
+    case — planting a canary in a document you also index.
+    """
+    if obs.type in (ObservationType.tool, ObservationType.generation):
+        return True
+    return taint == TaintClass.model
+
+
 def analyze(
     trace_id: str,
     observations: list[Observation],
     tool_overrides: dict[str, str] | None = None,
     canaries: list[str] | None = None,
+    canary_refs: list[CanaryRef] | None = None,
 ) -> tuple[list[Finding], int]:
     """Return (findings, taint_frontier_index)."""
     findings: list[Finding] = []
-    canaries = canaries or []
+    # `canaries` (raw strings) is the pre-CanaryRef interface; adapt rather than
+    # branch, so there is one matching path below.
+    refs = list(canary_refs or []) + canary_mod.legacy_refs(canaries or [])
 
     # Resolve taint for each observation, in order.
     taints = [taint_mod.classify(o, tool_overrides) for o in observations]
@@ -115,9 +134,15 @@ def analyze(
 
         text = obs.content or ""
 
-        # ---- canary egress (behavior-based, near-zero FP) ----
-        for canary in canaries:
-            if canary and canary in text and t in (TaintClass.model, TaintClass.untrusted_external):
+        # ---- canary egress (behaviour-based, near-zero FP) ----
+        #
+        # Checked on every span before the taint-influence filter below, and
+        # independently of it. A canary hit needs no corroboration and no taint
+        # frontier: the marker was somewhere it could only have come from, and
+        # it is now here. Gating it on the rest of L4's reasoning would mean the
+        # product's most reliable signal could be suppressed by its least.
+        if _is_egress(obs, t):
+            for hit in canary_mod.find_canaries(text, refs):
                 findings.append(
                     Finding(
                         observation_id=obs.observation_id,
@@ -127,7 +152,11 @@ def analyze(
                         outcome=Outcome.succeeded,
                         score=98.0,
                         l4_signals=["canary_triggered"],
-                        evidence_excerpt=f"canary token present in {obs.type.value} span",
+                        evidence_excerpt=(
+                            f"canary {hit.label or hit.id or 'token'} appeared in a "
+                            f"{obs.type.value} span"
+                        ),
+                        canary_id=hit.id,
                     )
                 )
 

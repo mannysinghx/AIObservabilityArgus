@@ -8,3 +8,4 @@ export * from "./redact.js";
 export * from "./content.js";
 export * from "./ratelimit.js";
 export * from "./keyevents.js";
+export * from "./canaries.js";

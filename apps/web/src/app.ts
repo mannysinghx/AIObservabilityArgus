@@ -12,6 +12,7 @@ import * as Auth from "./auth.js";
 import * as Admin from "./admin.js";
 import * as Audit from "./audit.js";
 import * as Settings from "./settings.js";
+import * as Canaries from "./canaryAdmin.js";
 import { applySecurityHeaders } from "./headers.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -490,6 +491,44 @@ export async function buildApp() {
       audit(req, "settings.updated", { orgId: g.orgId, targetType: "project", target: project, metadata: { version: r.version } });
       return r;
     } catch (err) { app.log.error({ err }, "settings write failed"); reply.code(500).send({ error: String(err) }); }
+  });
+
+  // ---------------- canaries (view: member+, manage: admin+) ----------------
+  // Planted markers that should never travel. A hit here is the one finding in
+  // the product that is asserted rather than inferred.
+  app.get("/api/canaries", async (req, reply) => {
+    const project = (req.query as ScopedQuery).project;
+    const g = await roleGate(req, reply, project, "member");
+    if (!g) return;
+    try { return { canaries: await Canaries.listCanaries(project!) }; }
+    catch (err) { app.log.error({ err }, "canary list failed"); reply.code(503).send({ error: "query failed" }); }
+  });
+
+  app.post<{ Body: { project?: string; label?: string; value?: string } }>("/api/canaries", async (req, reply) => {
+    const project = req.body?.project;
+    const g = await roleGate(req, reply, project, "admin");
+    if (!g) return;
+    try {
+      const r = await Canaries.createCanary(project!, req.body?.label || "", userOf(req)!.email, req.body?.value);
+      if ("error" in r) { reply.code(400).send(r); return; }
+      // The label is audited, never the value — an audit log that records the
+      // canary is an audit log that leaks it.
+      audit(req, "canary.created", {
+        orgId: g.orgId, targetType: "canary", target: r.id,
+        metadata: { label: r.label, kind: r.kind, project },
+      });
+      return r;
+    } catch (err) { app.log.error({ err }, "canary create failed"); reply.code(500).send({ error: "could not create canary" }); }
+  });
+
+  app.delete<{ Params: { id: string }; Querystring: ScopedQuery }>("/api/canaries/:id", async (req, reply) => {
+    const project = req.query.project;
+    const g = await roleGate(req, reply, project, "admin");
+    if (!g) return;
+    const r = await Canaries.revokeCanary(project!, req.params.id);
+    if ("error" in r) { reply.code(400).send(r); return; }
+    audit(req, "canary.revoked", { orgId: g.orgId, targetType: "canary", target: req.params.id, metadata: { project } });
+    return r;
   });
 
   app.get<{ Params: { id: string }; Querystring: ScopedQuery }>("/api/trace/:id", async (req, reply) => {

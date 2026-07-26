@@ -102,6 +102,30 @@ class LayerResult(BaseModel):
     detail: dict[str, float] = Field(default_factory=dict)  # e.g. per-model L2 scores
 
 
+class CanaryKind(str, Enum):
+    generated = "generated"
+    custom = "custom"
+
+
+class CanaryRef(BaseModel):
+    """One canary to watch for in egress.
+
+    A `generated` canary carries only its hash: the value has a known prefix, so
+    the detector extracts candidates from the text and compares digests. That
+    keeps raw canary values out of this service entirely — it never receives
+    them, so it cannot leak them in a log line, a traceback, or a crash dump.
+
+    A `custom` canary is a string the customer planted themselves. Matching an
+    arbitrary string requires holding it, so `value` is populated for those.
+    """
+
+    id: str
+    label: str = ""
+    kind: CanaryKind = CanaryKind.generated
+    token_hash: str = ""
+    value: str = ""
+
+
 class Finding(BaseModel):
     """A raised security event (pre-persistence shape)."""
 
@@ -116,6 +140,9 @@ class Finding(BaseModel):
     l3_verdict: str = ""
     l4_signals: list[str] = Field(default_factory=list)
     evidence_excerpt: str = ""
+    # Which canary fired, when this is a canary finding. Lets the worker stamp
+    # last_triggered_at without re-deriving the match.
+    canary_id: str = ""
 
 
 class ScanRequest(BaseModel):
@@ -143,8 +170,10 @@ class TraceScanRequest(BaseModel):
     trace_id: str
     observations: list[Observation]
     tool_overrides: dict[str, str] = Field(default_factory=dict)
-    # Canary tokens registered for this project (raw values, matched in egress).
+    # Raw canary values. Kept for backwards compatibility with callers that
+    # predate canary_refs; prefer canary_refs, which supports hash-only matching.
     canaries: list[str] = Field(default_factory=list)
+    canary_refs: list[CanaryRef] = Field(default_factory=list)
 
 
 class TraceScanResponse(BaseModel):

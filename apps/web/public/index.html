@@ -107,6 +107,7 @@
       <div class="nav-label">Manage</div>
       <button class="nav-item" type="button" data-nav="settings" id="navSettings"><span class="nav-ico">⚙</span>Settings</button>
       <button class="nav-item" type="button" data-nav="keys" id="navKeys"><span class="nav-ico">⚿</span>API Keys</button>
+      <button class="nav-item" type="button" data-nav="canaries" id="navCanaries"><span class="nav-ico">◈</span>Canaries</button>
       <button class="nav-item" type="button" data-nav="team"><span class="nav-ico">◍</span>Team</button>
       <button class="nav-item" type="button" data-nav="audit" id="navAudit"><span class="nav-ico">≡</span>Audit log</button>
     </div>
@@ -182,6 +183,47 @@
           <div class="card-head"><span class="card-title">Keys for this application</span><button class="btn btn-primary" id="createKeyBtn" type="button" style="padding:6px 12px;font-size:12px">Create key</button></div>
           <div id="newKeyBox"></div>
           <div class="tablewrap"><table id="keysTable"><tbody><tr><td class="loading">loading…</td></tr></tbody></table></div>
+        </div>
+      </section>
+
+      <!-- CANARIES -->
+      <section class="view" id="view-canaries">
+        <div class="page-head"><h1 class="page-title">Canaries</h1><span class="page-sub"><span id="canariesSub">loading…</span></span></div>
+        <div class="set-intro card" style="padding:calc(var(--u)*2.6) calc(var(--u)*3.2);font-size:12.5px;color:var(--ink-muted)">
+          A <b>canary</b> is a unique marker you plant somewhere it should never travel from — a system prompt, an internal
+          document, a customer record. Every other detector on this platform reads text and makes a judgement about intent,
+          and a judgement can be argued with. A canary firing is not a judgement: this exact string was somewhere it could
+          only have come from, and it has now turned up in something your app sent outward.
+          <b>There is no benign explanation.</b> This is the one alert worth waking someone up for.
+          <div style="margin-top:10px">Argus watches model outputs and tool calls. It deliberately does <b>not</b> alert when a
+          canary comes back from a search or retrieval step — finding it in a document you planted it in is the system working.</div>
+        </div>
+        <div class="card" id="canaryCreateCard" style="display:none">
+          <div class="card-head"><span class="card-title">Plant a canary</span></div>
+          <div class="pad" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;padding:calc(var(--u)*3)">
+            <div class="field" style="flex:1;min-width:220px">
+              <label for="canaryLabel" style="font-size:12px;font-weight:600">Where are you planting it?</label>
+              <input id="canaryLabel" type="text" placeholder="e.g. production system prompt" style="font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink);width:100%">
+            </div>
+            <button class="btn btn-primary" id="createCanaryBtn" type="button" style="padding:8px 14px;font-size:12.5px">Generate canary</button>
+          </div>
+          <details style="padding:0 calc(var(--u)*3) calc(var(--u)*3);font-size:12px;color:var(--ink-muted)">
+            <summary style="cursor:pointer">Use a marker I've already planted instead</summary>
+            <p style="margin:8px 0">If you've already seeded something — a decoy API key, a fake employee record — enter it here and
+            Argus will watch for that exact string.</p>
+            <p style="margin:8px 0"><b>Note the trade-off.</b> A generated canary is stored only as a hash: Argus can detect it
+            without ever holding it, so a breach of this database doesn't reveal your markers. A value you supply has to be
+            stored as-is, because there's no other way to match an arbitrary string.</p>
+            <div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap">
+              <input id="canaryCustom" type="text" placeholder="your existing marker (min 12 characters)" style="flex:1;min-width:240px;font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink)">
+              <button class="btn" id="createCustomCanaryBtn" type="button" style="padding:8px 14px;font-size:12.5px">Register marker</button>
+            </div>
+          </details>
+          <div id="newCanaryBox"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><span class="card-title">Planted canaries</span></div>
+          <div class="tablewrap"><table id="canariesTable"><tbody><tr><td class="loading">loading…</td></tr></tbody></table></div>
         </div>
       </section>
 

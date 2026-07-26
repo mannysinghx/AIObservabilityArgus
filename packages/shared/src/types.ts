@@ -85,4 +85,7 @@ export interface Finding {
   l3_verdict: string;
   l4_signals: string[];
   evidence_excerpt: string;
+  /** Set when this is a canary finding — lets the worker stamp the canary as
+   *  triggered without re-deriving which one matched. */
+  canary_id?: string;
 }

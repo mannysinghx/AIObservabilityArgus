@@ -1,4 +1,4 @@
-import { config, contentOf, type Finding, type ObservationInput } from "@argus/shared";
+import { config, contentOf, type CanaryRef, type Finding, type ObservationInput } from "@argus/shared";
 
 /** Thin client for the Python detection service (services/detection). */
 
@@ -71,11 +71,20 @@ export async function scanTrace(
   projectId: string,
   traceId: string,
   observations: ObservationInput[],
-  canaries: string[] = [],
+  canaryRefs: CanaryRef[] = [],
 ): Promise<Finding[]> {
   const body = {
     project_id: projectId,
     trace_id: traceId,
+    // Generated canaries travel as hashes only. The detection service handles
+    // hostile text all day; anything it doesn't hold, it can't leak.
+    canary_refs: canaryRefs.map((c) => ({
+      id: c.id,
+      label: c.label,
+      kind: c.kind,
+      token_hash: c.tokenHash,
+      value: c.value,
+    })),
     observations: observations.map((o) => ({
       observation_id: o.observationId,
       trace_id: o.traceId,
@@ -90,7 +99,6 @@ export async function scanTrace(
       attributes: o.attributes ?? {},
     })),
     tool_overrides: {},
-    canaries,
   };
   const res = await fetch(`${config.detectionUrl}/v1/scan/trace`, {
     method: "POST",

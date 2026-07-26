@@ -59,6 +59,7 @@ def scan_trace(req: TraceScanRequest) -> TraceScanResponse:
         req.observations,
         tool_overrides=req.tool_overrides,
         canaries=req.canaries,
+        canary_refs=req.canary_refs,
     )
     return TraceScanResponse(
         project_id=req.project_id,

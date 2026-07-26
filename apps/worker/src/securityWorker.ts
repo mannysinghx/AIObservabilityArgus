@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import {
   contentSha256,
   insertRows,
+  loadCanaries,
+  markCanaryTriggered,
   redis,
   toChDateTime,
   loadProjectConfig,
@@ -66,6 +68,11 @@ async function persistAndAlert(
   if (findings.length === 0) return;
   const rows = findings.map((f) => findingToRow(projectId, f, hashes));
   await insertRows("security_events", rows);
+  // Stamp any canary that fired, so the Canaries screen can show "last
+  // triggered" without scanning the whole event table.
+  for (const f of findings) {
+    if (f.canary_id) await markCanaryTriggered(f.canary_id);
+  }
   for (const f of findings) await maybeAlert(projectId, f, minSeverity);
   console.log(
     `[security-workers] raised ${findings.length} event(s): ` +
@@ -130,7 +137,10 @@ export async function handleSecurityBatch(events: StreamEvent[]) {
         })
         .filter((x): x is ObservationInput => x !== null);
       try {
-        const findings = await scanTrace(ev.projectId, traceId, observations);
+        // Canaries are loaded per project (cached ~30s) and only when the
+        // project has the feature on. Generated ones travel as hashes.
+        const canaryRefs = cfg.canaries.enabled ? await loadCanaries(ev.projectId) : [];
+        const findings = await scanTrace(ev.projectId, traceId, observations, canaryRefs);
         await persistAndAlert(ev.projectId, findings, minSeverity, hashIndex(observations));
       } catch (err) {
         console.error("[security-workers] trace scan failed:", err);

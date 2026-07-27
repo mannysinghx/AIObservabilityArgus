@@ -43,6 +43,27 @@ export interface Tenant {
   secret: string; // a distinctive string that must never appear in the other tenant's responses
 }
 
+/**
+ * A distinct client address per fixture.
+ *
+ * Signup is rate-limited to a handful per IP per hour, and the counter lives in
+ * Redis, so it survives between runs. Every fixture arriving from 127.0.0.1
+ * meant the suite exhausted its own quota and then failed in `before()` with a
+ * 429 — a real limit doing its job, in a test that had no business tripping it.
+ * Different tenants signing up from different addresses is also what actually
+ * happens, so this exercises the production path rather than bypassing it.
+ */
+// Seeded randomly rather than from zero. node:test runs each file in its own
+// process, so a plain counter restarts at 1 in every file — the suites then
+// collide on the same handful of addresses, and because the limit counter lives
+// in Redis it survives between runs too. The symptom is a suite that passes
+// alone and fails in the full run, which is the worst kind of flake to chase.
+let clientSeq = Math.floor(Math.random() * 0xfff0);
+function nextClientIp(): string {
+  clientSeq = (clientSeq + 1) & 0xffff;
+  return `10.${1 + (clientSeq % 200)}.${(clientSeq >> 8) & 0xff}.${(clientSeq & 0xff) || 1}`;
+}
+
 /** A signed-in user, their org, their app, and one trace's worth of data. */
 export async function makeTenant(app: App, label: string): Promise<Tenant> {
   const nonce = randomUUID().slice(0, 8);
@@ -53,6 +74,7 @@ export async function makeTenant(app: App, label: string): Promise<Tenant> {
   const signup = await app.inject({
     method: "POST",
     url: "/api/auth/signup",
+    remoteAddress: nextClientIp(),
     payload: { email, password, name: label, company: `${label} Ltd ${nonce}` },
   });
   if (signup.statusCode !== 200) {

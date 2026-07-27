@@ -180,7 +180,28 @@
       <section class="view" id="view-keys">
         <div class="page-head"><h1 class="page-title">API Keys</h1><span class="page-sub"><span id="keysSub">loading…</span></span></div>
         <div class="card">
-          <div class="card-head"><span class="card-title">Keys for this application</span><button class="btn btn-primary" id="createKeyBtn" type="button" style="padding:6px 12px;font-size:12px">Create key</button></div>
+          <div class="card-head"><span class="card-title">Keys for this application</span></div>
+          <div class="pad" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;padding:calc(var(--u)*3) calc(var(--u)*3) 0">
+            <div class="field" style="flex:1;min-width:180px">
+              <label for="keyLabel" style="font-size:12px;font-weight:600">What is this key for?</label>
+              <input id="keyLabel" type="text" placeholder="e.g. production backend" style="width:100%;font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink)">
+            </div>
+            <div class="field">
+              <label for="keyScope" style="font-size:12px;font-weight:600">Access</label>
+              <select id="keyScope" style="font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink)">
+                <option value="ingest" selected>Send data (ingest)</option>
+                <option value="read">Read data (API)</option>
+                <option value="ingest,read">Both</option>
+              </select>
+            </div>
+            <button class="btn btn-primary" id="createKeyBtn" type="button" style="padding:8px 14px;font-size:12.5px">Create key</button>
+          </div>
+          <div class="pad" style="padding:calc(var(--u)*1.5) calc(var(--u)*3) 0;font-size:12px;color:var(--ink-muted)">
+            An <b>ingest</b> key only adds telemetry — it can't read anything back, which is what you want for a credential
+            deployed across every host running your app. A <b>read</b> key powers the <span class="mono">/v1</span> API:
+            your own dashboards, a SIEM connector, scheduled exports. Keep them separate so a leaked ingest key can't be
+            used to download everything it ever sent.
+          </div>
           <div id="newKeyBox"></div>
           <div class="tablewrap"><table id="keysTable"><tbody><tr><td class="loading">loading…</td></tr></tbody></table></div>
         </div>

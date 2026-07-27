@@ -1067,21 +1067,35 @@ async function loadKeys() {
     const keys = d.keys || [];
     $("#keysSub").textContent = `${keys.length} key${keys.length !== 1 ? "s" : ""} for this application`;
     const t = $("#keysTable");
-    t.innerHTML = `<thead><tr><th>Public key</th><th>Created</th><th>Last used</th><th></th></tr></thead><tbody>` +
-      keys.map((k) => `<tr><td class="mono">${esc(k.publicKey)}</td><td class="dim">${k.createdAt ? ago(k.createdAt) : "—"}</td><td class="dim">${k.lastUsedAt ? ago(k.lastUsedAt) : "never"}</td><td style="text-align:right"><button class="btn" data-revoke="${esc(k.id)}" style="padding:3px 9px;font-size:11px;color:var(--sev-critical)">Revoke</button></td></tr>`).join("") + "</tbody>";
+    const scopeChip = (sc) => (sc || []).length
+      ? sc.map((x) => `<span class="cat">${esc(x)}</span>`).join(" ")
+      : '<span class="dim">—</span>';
+    t.innerHTML = `<thead><tr><th>Label</th><th>Access</th><th>Public key</th><th>Created</th><th>Last used</th><th></th></tr></thead><tbody>` +
+      keys.map((k) => `<tr><td>${esc(k.label || "—")}</td><td>${scopeChip(k.scopes)}</td><td class="mono">${esc(k.publicKey)}</td><td class="dim">${k.createdAt ? ago(k.createdAt) : "—"}</td><td class="dim">${k.lastUsedAt ? ago(k.lastUsedAt) : "never"}</td><td style="text-align:right"><button class="btn" data-revoke="${esc(k.id)}" style="padding:3px 9px;font-size:11px;color:var(--sev-critical)">Revoke</button></td></tr>`).join("") + "</tbody>";
     t.querySelectorAll("[data-revoke]").forEach((b) => b.addEventListener("click", () => revokeKey(b.dataset.revoke)));
     stamp();
   } catch (e) { banner("Keys query failed: " + e.message); }
 }
 $("#createKeyBtn")?.addEventListener("click", async () => {
   try {
-    const res = await fetch("/api/keys", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ project: PROJECT }) });
+    const scopes = ($("#keyScope")?.value || "ingest").split(",");
+    const label = $("#keyLabel")?.value.trim() || "";
+    const res = await fetch("/api/keys", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ project: PROJECT, scopes, label }) });
     const d = await res.json().catch(() => ({}));
     if (!res.ok) { banner(d.error || "Create failed"); return; }
+    const canRead = (d.scopes || []).includes("read");
+    const canIngest = (d.scopes || []).includes("ingest");
+    const usage = canIngest
+      ? `<div class="dim" style="font-size:11.5px;margin-top:8px">Set that environment variable where your app runs, then call <span class="mono">argus.init()</span> — the key stays out of your source. <span style="opacity:.8">Can't set env vars? Pass it directly: <span class="mono">argus.init("${esc(d.token || "")}")</span>.</span></div>`
+      : "";
+    const readUsage = canRead
+      ? `<div class="dim" style="font-size:11.5px;margin-top:8px">Read the <span class="mono">/v1</span> API with it:<br>
+         <span class="mono">curl -H "Authorization: Bearer ${esc(d.token || "")}" ${esc(location.origin)}/v1/security-events?severity=critical</span></div>`
+      : "";
     $("#newKeyBox").innerHTML = `<div style="margin:calc(var(--u)*2) calc(var(--u)*3);padding:12px 14px;border:1px solid var(--accent);border-radius:var(--radius);background:color-mix(in srgb,var(--accent) 8%,transparent)">
       <div style="font-weight:600;margin-bottom:6px">New key created — copy it now, it won't be shown again</div>
       <div class="mono" style="font-size:12px;line-height:1.7">ARGUS_KEY=${esc(d.token || "")}</div>
-      <div class="dim" style="font-size:11.5px;margin-top:8px">Set that environment variable where your app runs, then call <span class="mono">argus.init()</span> — the key stays out of your source. <span style="opacity:.8">Can't set env vars? Pass it directly: <span class="mono">argus.init("${esc(d.token || "")}")</span>.</span></div>
+      ${usage}${readUsage}
       <details style="font-size:11.5px;margin-top:8px"><summary style="cursor:pointer">Legacy public/secret pair</summary>
         <div class="mono" style="font-size:12px;line-height:1.7;padding-top:6px">public: ${esc(d.publicKey)}<br>secret: ${esc(d.secretKey)}</div></details></div>`;
     loadKeys();

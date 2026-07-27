@@ -14,6 +14,7 @@ import * as Audit from "./audit.js";
 import * as Settings from "./settings.js";
 import * as Canaries from "./canaryAdmin.js";
 import * as Governance from "./dataGovernance.js";
+import { registerPublicApi } from "./publicRoutes.js";
 import { applySecurityHeaders } from "./headers.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -135,6 +136,11 @@ export async function buildApp() {
     applySecurityHeaders(req, reply, { scriptHashes: demoScriptHashes });
     return reply.header("content-type", "text/html; charset=utf-8").header("cache-control", "no-cache").send(demoHtml);
   });
+
+  // The API-key-authenticated public surface. Registered as an encapsulated
+  // plugin so its auth hook applies only to its own routes and can't be
+  // confused with the session gate below.
+  await app.register(async (scope) => { await registerPublicApi(scope); });
 
   // `index: false` — "/" is served by the route above, not by static's own index.
   await app.register(fastifyStatic, { root: PUBLIC_DIR, prefix: "/", index: false });
@@ -404,15 +410,18 @@ export async function buildApp() {
     catch (err) { app.log.error({ err }, "keys list failed"); reply.code(503).send({ error: String(err) }); }
   });
 
-  app.post<{ Body: { project?: string } }>("/api/keys", async (req, reply) => {
+  app.post<{ Body: { project?: string; scopes?: string[]; label?: string } }>("/api/keys", async (req, reply) => {
     const project = req.body?.project;
     const g = await roleGate(req, reply, project, "admin");
     if (!g) return;
     try {
-      const key = await Onboarding.createKey(project!);
-      audit(req, "apikey.created", { orgId: g.orgId, targetType: "apikey", target: key.id, metadata: { publicKey: key.publicKey, project } });
+      const key = await Onboarding.createKey(project!, { scopes: req.body?.scopes, label: req.body?.label });
+      audit(req, "apikey.created", {
+        orgId: g.orgId, targetType: "apikey", target: key.id,
+        metadata: { publicKey: key.publicKey, project, scopes: key.scopes, label: key.label },
+      });
       return key;
-    } catch (err) { app.log.error({ err }, "key create failed"); reply.code(500).send({ error: String(err) }); }
+    } catch (err) { app.log.error({ err }, "key create failed"); reply.code(500).send({ error: "could not create key" }); }
   });
 
   app.delete<{ Params: { id: string }; Querystring: ScopedQuery }>("/api/keys/:id", async (req, reply) => {

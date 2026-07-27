@@ -180,6 +180,8 @@ export async function listProjectsWithStats(orgIds: string[]): Promise<ProjectSt
 export interface ApiKeyRow {
   id: string;
   publicKey: string;
+  label: string;
+  scopes: string[];
   createdAt: string;
   lastUsedAt: string | null;
 }
@@ -187,37 +189,75 @@ export interface ApiKeyRow {
 /** List a project's API keys — never the secret (only its hash is stored). */
 export async function listKeys(projectId: string): Promise<ApiKeyRow[]> {
   const safe = safeProjectId(projectId);
-  const { rows } = await pool.query<{ id: string; public_key: string; created_at: Date; last_used_at: Date | null }>(
-    `SELECT id, public_key, created_at, last_used_at FROM api_keys WHERE project_id = $1 ORDER BY created_at DESC`,
+  const { rows } = await pool.query<{
+    id: string; public_key: string; label: string | null; scopes: string[] | null;
+    created_at: Date; last_used_at: Date | null;
+  }>(
+    `SELECT id, public_key, label, scopes, created_at, last_used_at
+     FROM api_keys WHERE project_id = $1 AND revoked_at IS NULL ORDER BY created_at DESC`,
     [safe],
   );
   return rows.map((r) => ({
     id: r.id,
     publicKey: r.public_key,
+    label: r.label ?? "",
+    scopes: r.scopes ?? [],
     createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
     lastUsedAt: r.last_used_at ? (r.last_used_at instanceof Date ? r.last_used_at.toISOString() : String(r.last_used_at)) : null,
   }));
 }
 
-/** Mint a new key for a project. The token/secret are returned ONCE. */
-export async function createKey(projectId: string): Promise<{ id: string; token: string; publicKey: string; secretKey: string }> {
+export const VALID_SCOPES = ["ingest", "read"] as const;
+
+/**
+ * Mint a new key for a project. The token/secret are returned ONCE.
+ *
+ * Scopes default to `["ingest"]` — the historical behaviour and the safe one.
+ * A `read` key must be asked for explicitly, so nobody ends up with a
+ * data-reading credential deployed across their fleet because it was the
+ * default on a form.
+ */
+export async function createKey(
+  projectId: string,
+  opts: { scopes?: string[]; label?: string } = {},
+): Promise<{ id: string; token: string; publicKey: string; secretKey: string; scopes: string[]; label: string }> {
   const safe = safeProjectId(projectId);
+  const scopes = (opts.scopes ?? ["ingest"]).filter((s) => (VALID_SCOPES as readonly string[]).includes(s));
+  if (!scopes.length) scopes.push("ingest");
+  const label = String(opts.label ?? "").trim().slice(0, 120);
+
   const publicKey = genKey("pk");
   const secretKey = genKey("sk");
   const token = genToken();
   const { rows } = await pool.query<{ id: string }>(
-    `INSERT INTO api_keys (project_id, public_key, secret_hash, scopes, token_hash) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-    [safe, publicKey, sha256(secretKey), ["ingest"], sha256(token)],
+    `INSERT INTO api_keys (project_id, public_key, secret_hash, scopes, token_hash, label)
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+    [safe, publicKey, sha256(secretKey), scopes, sha256(token), label || null],
   );
-  return { id: rows[0].id, token, publicKey, secretKey };
+  return { id: rows[0].id, token, publicKey, secretKey, scopes, label };
 }
 
 /** Revoke a key. Refuses to remove the last key so a project can't be orphaned. */
 export async function revokeKey(projectId: string, keyId: string): Promise<{ ok: true } | { error: string }> {
   const safeP = safeProjectId(projectId);
   const safeK = String(keyId || "").replace(/[^a-zA-Z0-9-]/g, "");
-  const count = await pool.query("SELECT count(*)::int AS n FROM api_keys WHERE project_id = $1", [safeP]);
-  if ((count.rows[0] as { n: number }).n <= 1) return { error: "Can't revoke the last key — create a new one first." };
+  // Only ingest keys keep a project alive; refusing to revoke "the last key"
+  // when the last key is a read key would leave someone unable to revoke a
+  // leaked read credential.
+  const ingest = await pool.query(
+    `SELECT count(*)::int AS n FROM api_keys
+     WHERE project_id = $1 AND revoked_at IS NULL AND 'ingest' = ANY(scopes)`,
+    [safeP],
+  );
+  const target = await pool.query<{ scopes: string[] | null }>(
+    "SELECT scopes FROM api_keys WHERE id = $1 AND project_id = $2 AND revoked_at IS NULL",
+    [safeK, safeP],
+  );
+  if (!target.rowCount) return { error: "Key not found." };
+  const isIngest = (target.rows[0].scopes ?? []).includes("ingest");
+  if (isIngest && (ingest.rows[0] as { n: number }).n <= 1) {
+    return { error: "Can't revoke the last ingest key — create a new one first." };
+  }
   const res = await pool.query("DELETE FROM api_keys WHERE id = $1 AND project_id = $2", [safeK, safeP]);
   if (!res.rowCount) return { error: "Key not found." };
   // Tell the ingest replicas to forget their cached lookups now, rather than

@@ -12,3 +12,5 @@ export * from "./canaries.js";
 export * from "./retention.js";
 export * from "./apikeys.js";
 export * from "./alerting.js";
+export * from "./metrics.js";
+export * from "./queuestats.js";

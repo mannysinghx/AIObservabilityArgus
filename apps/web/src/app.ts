@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import Fastify from "fastify";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import fastifyStatic from "@fastify/static";
-import { config, rateLimit, LIMITS } from "@argus/shared";
+import { config, rateLimit, LIMITS, metrics, refreshQueueMetrics } from "@argus/shared";
 import * as Q from "./queries.js";
 import * as Onboarding from "./onboarding.js";
 import * as Auth from "./auth.js";
@@ -40,6 +40,19 @@ export async function buildApp() {
   // re-applies it with its own script hash.
   app.addHook("onRequest", async (req, reply) => {
     applySecurityHeaders(req, reply);
+    (req as unknown as { startedAt: number }).startedAt = Date.now();
+  });
+
+  // One counter and one histogram per route. The route pattern is used as the
+  // label rather than the URL, so /api/trace/:id is one series instead of one
+  // series per trace id — an unbounded label set is how a metrics endpoint
+  // becomes the outage.
+  app.addHook("onResponse", async (req, reply) => {
+    const route = (req as unknown as { routeOptions?: { url?: string } }).routeOptions?.url ?? "unknown";
+    const labels = { route, method: req.method, status: String(reply.statusCode) };
+    metrics.inc("argus_http_requests_total", labels, 1, "HTTP requests served");
+    const started = (req as unknown as { startedAt?: number }).startedAt;
+    if (started) metrics.observe("argus_http_duration_ms", Date.now() - started, { route }, "HTTP request duration");
   });
 
   // Nothing internal reaches a client. Individual routes already catch their own
@@ -163,6 +176,14 @@ export async function buildApp() {
   // the ?v= in the page source to tell "my browser is stale" apart from "the
   // server never picked up my deploy".
   app.get("/health", async () => ({ status: (await Q.health()) ? "ok" : "degraded", service: "argus-web", assetVersion: ASSET_VERSION }));
+
+  // Prometheus scrape target. Not behind the session gate (which only guards
+  // /api/*): a scraper has no session. Counts and latencies only — no customer
+  // content ever reaches this endpoint.
+  app.get("/metrics", async (_req, reply) => {
+    await refreshQueueMetrics().catch(() => {});
+    reply.header("content-type", "text/plain; version=0.0.4").send(metrics.render());
+  });
 
   // ---------------- auth gate ----------------
   // Resolve the signed-in user for every /api/* request from the session cookie,

@@ -123,3 +123,64 @@ def test_print_report(capsys):
             print(f"  misses:       {m['misses']}")
         if m["false_alarms"]:
             print(f"  false alarms: {m['false_alarms']}")
+
+
+# ---------------------------------------------------------------- gateway
+
+# Categories the inline gateway is allowed to block on. It sees ONE message with
+# no trace context, so it cannot judge the cross-span attacks that are Argus's
+# actual speciality — blocking on those here would refuse real users to catch
+# attacks this layer is not equipped to see.
+GATEWAY_BLOCKABLE = {"direct_injection", "jailbreak"}
+
+# Keep in sync with DEFAULT_GATEWAY_POLICY.blockThreshold in
+# packages/shared/src/gateway.ts.
+GATEWAY_BLOCK_THRESHOLD = 75.0
+
+
+def _gateway_would_block(row) -> bool:
+    obs = Observation(
+        observation_id=row["id"],
+        content=row["content"],
+        type=ObservationType(row.get("type", "span")),
+        taint=row.get("taint"),
+    )
+    resp = scan_observation(ScanRequest(observation=obs, tool_overrides={}))
+    return any(
+        f.category.value in GATEWAY_BLOCKABLE and f.score >= GATEWAY_BLOCK_THRESHOLD
+        for f in resp.findings
+    )
+
+
+def test_gateway_threshold_causes_no_false_blocks():
+    """The gateway must not refuse benign traffic.
+
+    The gateway is the only part of Argus on a customer's critical path, so a
+    false positive there is not a noisy alert — it is a user who cannot use the
+    product. This pins the threshold against the hard negatives (blog posts
+    about prompt injection, fiction quoting it, support text that legitimately
+    mentions previous instructions), so lowering it has to be a deliberate
+    decision with this test failing to say what it costs.
+    """
+    false_blocks = [row["id"] for row in _load()
+                    if row["label"] != "attack" and _gateway_would_block(row)]
+    assert not false_blocks, (
+        f"the gateway would refuse {len(false_blocks)} benign request(s) at "
+        f"threshold {GATEWAY_BLOCK_THRESHOLD}: {false_blocks}"
+    )
+
+
+def test_gateway_threshold_still_blocks_real_attacks():
+    """A threshold safe enough to block nothing would also be useless.
+
+    The gateway is deliberately a high-confidence, narrow layer — it is not
+    expected to catch everything, because the async pipeline catches the rest
+    seconds later. But it has to catch something, and a change that quietly
+    raised the threshold out of range would otherwise pass every other test.
+    """
+    blocked = [row["id"] for row in _load()
+               if row["label"] == "attack" and _gateway_would_block(row)]
+    assert len(blocked) >= 5, (
+        f"only {len(blocked)} of the corpus attacks would be blocked — the "
+        f"threshold is too high to be worth enabling"
+    )

@@ -415,9 +415,15 @@
         </div>
 
         <div class="card">
-          <div class="card-head"><span class="card-title">Enforcement</span><span class="card-hint">roadmap</span></div>
+          <div class="card-head"><span class="card-title">Enforcement</span><span class="card-hint">optional gateway</span></div>
           <div class="pad" style="padding:calc(var(--u)*3.2);font-size:12.5px;color:var(--ink-muted)">
-            Argus currently runs in <b>Observe</b> mode — it records and alerts, off your app's critical path, so it can never add latency or block a request. <b>Inline blocking</b> (stopping a prompt injection before your model sees it) requires the optional gateway and will appear here when it ships.
+            By default Argus runs in <b>Observe</b> mode — it records and alerts from beside your app's critical path, so it can
+            never add latency or fail a request.
+            <div style="margin-top:10px"><b>Inline blocking</b> is available through the optional <b>gateway</b>: point your
+            OpenAI SDK's <span class="mono">base_url</span> at it and Argus can refuse a high-confidence prompt injection before
+            your model ever sees it. It fails open by design — if detection is slow or down, your request goes through.</div>
+            <div style="margin-top:10px">Run it in observe mode first and watch what <i>would</i> have been blocked here in the
+            Threat Center. Setup is in <span class="mono">docs/12-gateway.md</span>.</div>
           </div>
         </div>
 

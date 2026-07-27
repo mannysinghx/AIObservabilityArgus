@@ -90,5 +90,5 @@ jobs:
       - run: npm install
       - name: Migrate
         run: node scripts/migrate.mjs
-      - name: Tenant isolation tests
+      - name: Integration tests (isolation, canaries, retention, API, alerting, consumer, gateway)
         run: npm run test:isolation

@@ -14,3 +14,4 @@ export * from "./apikeys.js";
 export * from "./alerting.js";
 export * from "./metrics.js";
 export * from "./queuestats.js";
+export * from "./gateway.js";

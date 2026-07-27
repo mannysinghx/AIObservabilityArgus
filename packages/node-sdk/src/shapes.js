@@ -31,7 +31,8 @@ function providerFromUrl(url) {
 
 /**
  * Classify a request by URL + parsed body. Returns one of:
- *   "openai-chat" | "openai-responses" | "anthropic-messages" | null
+ *   "openai-chat" | "openai-responses" | "anthropic-messages" |
+ *   "google-generate" | null
  * null means "not an LLM call we know how to capture" — pass it through.
  */
 function classify(url, body) {
@@ -40,6 +41,12 @@ function classify(url, body) {
   if (/\/responses\b/.test(u)) return "openai-responses";
   if (/\/v1\/messages\b/.test(u) || /\/messages\b/.test(u) && looksAnthropic(body))
     return "anthropic-messages";
+  // Google Gemini's native API — `@google/generative-ai` and raw fetch both hit
+  // /v1beta/models/<model>:generateContent. Nothing about it looks like the
+  // OpenAI shape: the model is in the path, and the turns live in `contents`
+  // rather than `messages`, so the body-shape fallback below never matches it.
+  if (/:(stream)?generateContent\b/i.test(u) || (body && Array.isArray(body.contents)))
+    return "google-generate";
   // Fall back to body shape for OpenAI-compatible endpoints on nonstandard paths.
   if (body && Array.isArray(body.messages) && body.model) {
     // Anthropic bodies also have messages+model; disambiguate on max_tokens +
@@ -80,6 +87,55 @@ function contentToText(content) {
   return "";
 }
 
+/**
+ * Gemini's `parts` are the equivalent of OpenAI's content array: an array of
+ * {text} objects, possibly with inline media we summarize rather than store.
+ */
+function googlePartsToText(parts) {
+  if (!Array.isArray(parts)) return contentToText(parts);
+  return parts
+    .map((p) => {
+      if (typeof p === "string") return p;
+      if (p == null) return "";
+      if (typeof p.text === "string") return p.text;
+      if (p.inlineData || p.fileData) return "[media]";
+      if (p.functionCall) return JSON.stringify(p.functionCall);
+      if (p.functionResponse) return JSON.stringify(p.functionResponse);
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+/**
+ * Serialize Gemini's `contents` into the same transcript format the other
+ * providers produce. `systemInstruction` is a bare Content (or plain string)
+ * that sits outside the turn list, so it's prefixed the way `system:` is for
+ * Anthropic — detection reads these transcripts, and it must not have to care
+ * which provider produced one.
+ */
+function googleContentsToText(contents, systemInstruction) {
+  const lines = [];
+  if (systemInstruction) {
+    const sys =
+      typeof systemInstruction === "string"
+        ? systemInstruction
+        : googlePartsToText(systemInstruction.parts);
+    if (sys) lines.push("system: " + sys);
+  }
+  for (const c of contents || []) {
+    if (!c) continue;
+    lines.push((c.role || "user") + ": " + googlePartsToText(c.parts));
+  }
+  return lines.join("\n");
+}
+
+/** Gemini puts the model in the path: /v1beta/models/<model>:generateContent */
+function modelFromGoogleUrl(url) {
+  const m = /\/models\/([^/:?#]+)/.exec(String(url || ""));
+  return m ? m[1] : "";
+}
+
 /** Serialize an array of chat messages into a readable transcript string. */
 function messagesToText(messages, system) {
   const lines = [];
@@ -93,8 +149,21 @@ function messagesToText(messages, system) {
 
 // ---------- request parsers ----------
 
-function parseRequest(kind, body) {
+/**
+ * `url` is optional and only consulted for providers that put the model in the
+ * path (Gemini). Callers that already hold a parsed request body — the SDK-level
+ * openai/anthropic patches — can keep passing two arguments.
+ */
+function parseRequest(kind, body, url) {
   try {
+    if (kind === "google-generate") {
+      return {
+        model: modelFromGoogleUrl(url) || body.model || "",
+        input: googleContentsToText(body.contents, body.systemInstruction),
+        // Gemini signals streaming in the path, not the body.
+        stream: /:streamGenerateContent\b/i.test(String(url || "")),
+      };
+    }
     if (kind === "anthropic-messages") {
       return {
         model: body.model || "",
@@ -124,6 +193,16 @@ function parseRequest(kind, body) {
 
 function parseResponse(kind, json) {
   try {
+    if (kind === "google-generate") {
+      const cand = (json.candidates && json.candidates[0]) || {};
+      const u = json.usageMetadata || {};
+      return {
+        output: googlePartsToText(cand.content && cand.content.parts),
+        inputTokens: u.promptTokenCount || 0,
+        outputTokens: u.candidatesTokenCount || 0,
+        finishReason: cand.finishReason || "",
+      };
+    }
     if (kind === "anthropic-messages") {
       const output = Array.isArray(json.content)
         ? json.content.map((b) => (b && typeof b.text === "string" ? b.text : "")).filter(Boolean).join("\n")
@@ -209,6 +288,17 @@ function parseStream(kind, sseText) {
         if (json.usage && json.usage.output_tokens) outputTokens = json.usage.output_tokens;
         if (json.delta && json.delta.stop_reason) finishReason = json.delta.stop_reason;
       }
+    } else if (kind === "google-generate") {
+      // Each SSE event is a whole GenerateContentResponse carrying the next
+      // slice of text (only present with ?alt=sse, which is what the Google SDK
+      // uses; the bare JSON-array streaming form yields no events here).
+      const cand = (json.candidates && json.candidates[0]) || {};
+      output += googlePartsToText(cand.content && cand.content.parts);
+      if (cand.finishReason) finishReason = cand.finishReason;
+      if (json.usageMetadata) {
+        inputTokens = json.usageMetadata.promptTokenCount || inputTokens;
+        outputTokens = json.usageMetadata.candidatesTokenCount || outputTokens;
+      }
     } else {
       // openai chat/completions streaming
       const choice = (json.choices && json.choices[0]) || {};
@@ -232,4 +322,7 @@ module.exports = {
   parseStream,
   contentToText,
   messagesToText,
+  googlePartsToText,
+  googleContentsToText,
+  modelFromGoogleUrl,
 };

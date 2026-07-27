@@ -19,7 +19,9 @@ const argus = require("@argus/node").init();
 app.use(argus.middleware());
 ```
 
-That's the whole integration. From here, every OpenAI, Anthropic, and OpenAI-compatible call (DeepSeek, Gemini, GLM/Z.ai, Groq, Mistral, …) made via the official SDKs or raw `fetch` is captured automatically — prompt, completion, model, token counts, cost (auto-estimated), and latency — and scanned by Argus's detection pipeline.
+That's the whole integration. From here, every OpenAI, Anthropic, and OpenAI-compatible call (DeepSeek, Kimi/Moonshot, GLM/Z.ai, Groq, Mistral, …) made via the official SDKs or raw `fetch` is captured automatically — prompt, completion, model, token counts, cost (auto-estimated), and latency — and scanned by Argus's detection pipeline.
+
+Google Gemini's **native** API is captured too (`@google/generative-ai`, or raw `fetch` to `…/models/<model>:generateContent`), streaming included. Gemini puts the model in the URL path and the turns in `contents` rather than `messages`, so it's recognized as its own wire shape. The API key Google expects as a `?key=` query parameter is never recorded.
 
 ### Configuration
 

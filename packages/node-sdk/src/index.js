@@ -21,7 +21,7 @@ const fetchInstr = require("./instrument/fetch");
 const openaiInstr = require("./instrument/openai");
 const anthropicInstr = require("./instrument/anthropic");
 
-const VERSION = "0.1.0";
+const VERSION = "0.1.1";
 let initialized = false;
 
 /**

@@ -101,7 +101,9 @@ function describe(input, init) {
   // classify by URL alone for the well-known endpoints.
   const kind = shapes.classify(url, body);
   if (!kind) return null;
-  const req = shapes.parseRequest(kind, body || {});
+  // The URL is passed too: Gemini carries the model and the stream flag in the
+  // path rather than the body.
+  const req = shapes.parseRequest(kind, body || {}, url);
   return {
     kind,
     url,

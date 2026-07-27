@@ -7,6 +7,7 @@
 const { runGuarded } = require("../guard");
 const { isEnabled, log } = require("../config");
 const { captureGeneration } = require("../capture");
+const { redefine } = require("./redefine");
 const shapes = require("../shapes");
 
 function install() {
@@ -31,11 +32,13 @@ function install() {
   }
   ArgusAnthropic.__argusPatched = true;
 
-  try {
-    mod.Anthropic = ArgusAnthropic;
-    if (mod.default === Client) mod.default = ArgusAnthropic;
-  } catch (err) {
-    log("anthropic module reassign failed", err);
+  // Read `default` before swapping `Anthropic`, so we know whether the two
+  // exports pointed at the same class to begin with.
+  const defaultWasClient = mod.default === Client;
+  const named = redefine(mod, "Anthropic", ArgusAnthropic);
+  const dflt = defaultWasClient ? redefine(mod, "default", ArgusAnthropic) : false;
+  if (!named && !dflt) {
+    log("anthropic module reassign failed — exports are not configurable");
   }
 }
 

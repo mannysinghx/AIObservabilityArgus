@@ -12,6 +12,7 @@
 const { runGuarded } = require("../guard");
 const { isEnabled, log } = require("../config");
 const { captureGeneration } = require("../capture");
+const { redefine } = require("./redefine");
 const shapes = require("../shapes");
 
 function install() {
@@ -36,11 +37,13 @@ function install() {
   }
   ArgusOpenAI.__argusPatched = true;
 
-  try {
-    mod.OpenAI = ArgusOpenAI;
-    if (mod.default === Client) mod.default = ArgusOpenAI;
-  } catch (err) {
-    log("openai module reassign failed", err);
+  // Read `default` before swapping `OpenAI`, so we know whether the two exports
+  // pointed at the same class to begin with.
+  const defaultWasClient = mod.default === Client;
+  const named = redefine(mod, "OpenAI", ArgusOpenAI);
+  const dflt = defaultWasClient ? redefine(mod, "default", ArgusOpenAI) : false;
+  if (!named && !dflt) {
+    log("openai module reassign failed — exports are not configurable");
   }
 }
 

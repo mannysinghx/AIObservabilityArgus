@@ -53,6 +53,30 @@ function startLlm() {
       req.on("data", (c) => (body += c));
       req.on("end", () => {
         const b = JSON.parse(body || "{}");
+        if (req.url.includes(":streamGenerateContent")) {
+          // Gemini SSE: each event is a whole response carrying the next slice.
+          res.writeHead(200, { "content-type": "text/event-stream" });
+          const chunk = (o) => res.write("data: " + JSON.stringify(o) + "\n\n");
+          chunk({ candidates: [{ content: { role: "model", parts: [{ text: "Gem" }] } }] });
+          chunk({
+            candidates: [{ content: { role: "model", parts: [{ text: "ini!" }] }, finishReason: "STOP" }],
+            usageMetadata: { promptTokenCount: 6, candidatesTokenCount: 2 },
+          });
+          res.end();
+          return;
+        }
+        if (req.url.includes(":generateContent")) {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(
+            JSON.stringify({
+              candidates: [
+                { content: { role: "model", parts: [{ text: "Hi from Gemini" }] }, finishReason: "STOP" },
+              ],
+              usageMetadata: { promptTokenCount: 7, candidatesTokenCount: 3, totalTokenCount: 10 },
+            }),
+          );
+          return;
+        }
         if (req.url.includes("/messages")) {
           // Anthropic
           res.writeHead(200, { "content-type": "application/json" });
@@ -177,6 +201,57 @@ async function main() {
     assert.strictEqual(gen.output, "Hi from Claude");
     assert.strictEqual(gen.inputTokens, 9);
     assert.ok(gen.input.includes("be brief"), "system prompt missing from input");
+  });
+
+  // Gemini's native API shares nothing with the OpenAI shape: model in the path,
+  // `contents` instead of `messages`, `usageMetadata` instead of `usage`. It also
+  // carries the API key as a query parameter, which must never reach ingestion.
+  const geminiUrl = (model, method) =>
+    `${llmBase}/v1beta/models/${model}:${method}?key=AIzaSy-FAKE-SECRET-KEY`;
+
+  await check("captures a Gemini generateContent call", async () => {
+    reset();
+    const r = await fetch(geminiUrl("gemini-3-flash-preview", "generateContent"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: "be brief" }] },
+        contents: [{ role: "user", parts: [{ text: "hello gemini" }] }],
+      }),
+    });
+    const json = await r.json();
+    assert.strictEqual(json.candidates[0].content.parts[0].text, "Hi from Gemini");
+    await settle();
+    const gen = received.observations.find((o) => o.type === "generation");
+    assert.ok(gen, "gemini call not captured");
+    assert.strictEqual(gen.model, "gemini-3-flash-preview", "model not read from the URL path");
+    assert.strictEqual(gen.provider, "127.0.0.1", "provider should come from the host");
+    assert.strictEqual(gen.output, "Hi from Gemini");
+    assert.strictEqual(gen.inputTokens, 7);
+    assert.strictEqual(gen.outputTokens, 3);
+    assert.ok(gen.input.includes("hello gemini"), "user turn missing from input");
+    assert.ok(gen.input.includes("be brief"), "systemInstruction missing from input");
+    assert.ok(
+      !JSON.stringify(received).includes("AIzaSy-FAKE-SECRET-KEY"),
+      "the API key from the query string leaked into ingestion",
+    );
+  });
+
+  await check("accumulates a Gemini streaming response", async () => {
+    reset();
+    const r = await fetch(geminiUrl("gemini-3.1-pro-preview", "streamGenerateContent"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "stream please" }] }] }),
+    });
+    const text = await r.text();
+    assert.ok(text.includes("Gem"), "caller lost the stream");
+    await settle();
+    const gen = received.observations.find((o) => o.type === "generation");
+    assert.ok(gen, "gemini streaming call not captured");
+    assert.strictEqual(gen.output, "Gemini!");
+    assert.strictEqual(gen.finishReason, "STOP");
+    assert.strictEqual(gen.outputTokens, 2);
   });
 
   await check("groups multiple calls in a trace() scope under one traceId", async () => {

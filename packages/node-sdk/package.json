@@ -1,6 +1,6 @@
 {
   "name": "@argus/node",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Drop-in auto-instrumenting tracer for Argus — security-first AI observability. One line captures every LLM call.",
   "license": "MIT",
   "type": "commonjs",

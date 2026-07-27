@@ -53,6 +53,8 @@ function applyRoleUI() {
   if (PROJECT && r >= 1) $("#manageGroup").style.display = "";
   const nk = $("#navKeys"), na = $("#navAudit"), ns = $("#navSettings"), nc = $("#navCanaries");
   if (nc) nc.style.display = PROJECT && r >= 1 ? "" : "none"; // canaries: view member+, manage admin+
+  const nal = $("#navAlerts");
+  if (nal) nal.style.display = PROJECT && r >= 1 ? "" : "none"; // alerts: view member+, manage admin+
   if (nk) nk.style.display = PROJECT && r >= 2 ? "" : "none";
   if (na) na.style.display = PROJECT && r >= 2 ? "" : "none"; // audit: admin+
   if (ns) ns.style.display = PROJECT && r >= 1 ? "" : "none"; // settings: view member+, save admin+
@@ -172,7 +174,7 @@ function breakdown(sel, items, isSev) {
 }
 
 // ---------- routing ----------
-const VIEWS = ["apps", "overview", "threat", "incidents", "review", "redteam", "traces", "trace", "sessions", "analytics", "prompts", "evals", "settings", "keys", "canaries", "team", "audit", "admin", "customers", "adminusers", "auditall", "appearance", "guide"];
+const VIEWS = ["apps", "overview", "threat", "incidents", "review", "redteam", "traces", "trace", "sessions", "analytics", "prompts", "evals", "settings", "keys", "canaries", "alerts", "team", "audit", "admin", "customers", "adminusers", "auditall", "appearance", "guide"];
 function show(view) {
   VIEWS.forEach((v) => $(`#view-${v}`).classList.toggle("on", v === view));
   document.querySelectorAll(".nav-item[data-nav]").forEach((b) => b.classList.toggle("active", b.dataset.nav === view));
@@ -705,7 +707,7 @@ function load(view) {
   // "N of M match" note rather than leaving it contradicting the screen.
   if (searchInput) { searchInput.value = ""; const n = $("#searchNote"); if (n) n.textContent = ""; }
   if (!PROJECT && SCOPED_VIEWS.has(view)) { banner("Select an application from Applications to view its data."); return; }
-  ({ apps: loadApps, overview: loadOverview, threat: loadThreat, incidents: loadIncidents, review: loadReview, traces: loadTraces, sessions: loadSessions, analytics: loadAnalytics, evals: loadEvals, settings: loadSettings, keys: loadKeys, canaries: loadCanaries, team: loadTeam, audit: loadAudit, admin: loadAdmin, customers: loadCustomers, adminusers: loadAdminUsers, auditall: loadAuditAll }[view] || (() => {}))();
+  ({ apps: loadApps, overview: loadOverview, threat: loadThreat, incidents: loadIncidents, review: loadReview, traces: loadTraces, sessions: loadSessions, analytics: loadAnalytics, evals: loadEvals, settings: loadSettings, keys: loadKeys, canaries: loadCanaries, alerts: loadAlerts, team: loadTeam, audit: loadAudit, admin: loadAdmin, customers: loadCustomers, adminusers: loadAdminUsers, auditall: loadAuditAll }[view] || (() => {}))();
 }
 
 // ---------- Canaries ----------
@@ -863,6 +865,141 @@ $("#eraseBtn")?.addEventListener("click", async () => {
     $("#eraseUserId").value = "";
   } catch (e) { note.textContent = "erasure failed: " + e.message; }
 });
+
+// ---------- Alerts (destinations + suppression) ----------
+const CHANNEL_HELP = {
+  slack:     { label: "Slack incoming-webhook URL", ph: "https://hooks.slack.com/services/…" },
+  pagerduty: { label: "PagerDuty Events v2 routing key", ph: "your integration routing key" },
+  webhook:   { label: "HTTPS endpoint", ph: "https://your-service.example.com/argus" },
+};
+$("#chKind")?.addEventListener("change", () => {
+  const h = CHANNEL_HELP[$("#chKind").value] || CHANNEL_HELP.webhook;
+  $("#chTargetLabel").textContent = h.label;
+  $("#chTarget").placeholder = h.ph;
+});
+
+async function loadAlerts() {
+  if (!PROJECT) { banner("Open an application to manage its alerts."); return; }
+  const canManage = (ROLE_RANK[PROJECT_ROLE] ?? -1) >= 2;
+  $("#channelCreateCard").style.display = canManage ? "" : "none";
+  $("#suppCreate").style.display = canManage ? "flex" : "none";
+  try {
+    const [ch, sup] = await Promise.all([api("/api/alerts/channels"), api("/api/alerts/suppressions")]);
+    banner("");
+    const channels = ch.channels || [], rules = sup.rules || [];
+    const failing = channels.filter((c) => c.consecutiveFailures > 0).length;
+    $("#alertsSub").textContent =
+      `${channels.length} destination${channels.length === 1 ? "" : "s"}` +
+      (failing ? ` · ${failing} failing` : "") +
+      (rules.length ? ` · ${rules.length} suppression rule${rules.length === 1 ? "" : "s"}` : "");
+
+    const t = $("#channelsTable");
+    if (!channels.length) {
+      t.innerHTML = `<tbody><tr><td class="empty" style="padding:calc(var(--u)*4)">
+        <div class="big">No destinations yet</div>
+        <p>Findings are recorded and visible here regardless — but nobody is being told about them.
+        Add Slack or PagerDuty above so a critical incident reaches a person.</p></td></tr></tbody>`;
+    } else {
+      t.innerHTML = `<thead><tr><th>Type</th><th>Label</th><th>Destination</th><th>Sends at</th><th>Health</th><th></th></tr></thead><tbody>` +
+        channels.map((c) => {
+          // A channel that has been failing quietly must not look like one that
+          // has simply had nothing to report.
+          const health = c.consecutiveFailures > 0
+            ? `<span class="pill sev-high">failing ×${c.consecutiveFailures}</span><div class="dim" style="font-size:11px">${esc(c.lastError || "")}</div>`
+            : c.lastSuccessAt
+              ? `<span class="dim">delivered ${ago(c.lastSuccessAt)}</span>`
+              : '<span class="dim">nothing sent yet</span>';
+          return `<tr><td><span class="cat">${esc(c.kind)}</span></td><td>${esc(c.label || "—")}</td>` +
+            `<td class="mono dim" style="font-size:11px">${esc(c.targetHint)}${c.signed ? ' <span class="cat" title="Deliveries are HMAC-signed">signed</span>' : ""}</td>` +
+            `<td class="dim">${esc(c.minSeverity)}+</td><td>${health}</td>` +
+            `<td style="text-align:right">${canManage ? `<button class="btn" data-test-ch="${esc(c.id)}" style="padding:3px 9px;font-size:11px">Test</button> <button class="btn" data-del-ch="${esc(c.id)}" style="padding:3px 9px;font-size:11px;color:var(--sev-critical)">Remove</button>` : ""}</td></tr>`;
+        }).join("") + "</tbody>";
+      t.querySelectorAll("[data-test-ch]").forEach((b) => b.addEventListener("click", () => testChannel(b, b.dataset.testCh)));
+      t.querySelectorAll("[data-del-ch]").forEach((b) => b.addEventListener("click", () => removeChannel(b.dataset.delCh)));
+    }
+
+    const st = $("#suppTable");
+    st.innerHTML = rules.length
+      ? `<thead><tr><th>Silences</th><th>Reason</th><th>Added</th><th>Expires</th><th></th></tr></thead><tbody>` +
+        rules.map((r) => `<tr><td class="mono" style="font-size:11.5px">${esc(r.ruleId || r.category || r.scopeValue || "—")}</td>` +
+          `<td>${esc(r.reason || "—")}<div class="dim" style="font-size:11px">${esc(r.createdBy || "")}</div></td>` +
+          `<td class="dim">${r.createdAt ? ago(r.createdAt) : "—"}</td>` +
+          `<td class="dim">${r.expiresAt ? ago(r.expiresAt) : "never"}</td>` +
+          `<td style="text-align:right">${canManage ? `<button class="btn" data-del-sup="${esc(r.id)}" style="padding:3px 9px;font-size:11px">Remove</button>` : ""}</td></tr>`).join("") + "</tbody>"
+      : '<tbody><tr><td class="empty" style="padding:calc(var(--u)*3)">Nothing suppressed — every finding above your threshold is being sent.</td></tr></tbody>';
+    st.querySelectorAll("[data-del-sup]").forEach((b) => b.addEventListener("click", () => removeSuppression(b.dataset.delSup)));
+    stamp();
+  } catch (e) { banner("Alerts query failed: " + e.message); }
+}
+
+$("#addChannelBtn")?.addEventListener("click", async () => {
+  const body = {
+    project: PROJECT,
+    kind: $("#chKind").value,
+    target: $("#chTarget").value.trim(),
+    label: $("#chLabel").value.trim(),
+    minSeverity: $("#chSeverity").value,
+  };
+  try {
+    const res = await fetch("/api/alerts/channels", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { $("#channelResult").innerHTML = `<span style="color:var(--sev-high)">${esc(d.error || "Could not add it.")}</span>`; return; }
+    // The signing secret exists so the receiver can prove a delivery came from
+    // us. It is shown once, like every other credential here.
+    $("#channelResult").innerHTML = d.signingSecret
+      ? `<div style="padding:10px 12px;border:1px solid var(--accent);border-radius:var(--radius);background:color-mix(in srgb,var(--accent) 8%,transparent)">
+           <div style="font-weight:600;margin-bottom:4px">Added. Signing secret — copy it now, it won't be shown again</div>
+           <div class="mono" style="font-size:12px;word-break:break-all">${esc(d.signingSecret)}</div>
+           <div class="dim" style="font-size:11.5px;margin-top:6px">Verify deliveries with
+           <span class="mono">HMAC-SHA256(secret, "&lt;x-argus-timestamp&gt;.&lt;body&gt;")</span> against the
+           <span class="mono">x-argus-signature</span> header. Reject anything whose timestamp is old.</div>
+         </div>`
+      : '<span class="dim">Added. Use <b>Test</b> to confirm it works before you rely on it.</span>';
+    $("#chTarget").value = ""; $("#chLabel").value = "";
+    loadAlerts();
+  } catch (e) { $("#channelResult").textContent = "Could not add it: " + e.message; }
+});
+
+async function testChannel(btn, id) {
+  const original = btn.textContent;
+  btn.disabled = true; btn.textContent = "sending…";
+  try {
+    const res = await fetch("/api/alerts/channels/test", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ project: PROJECT, id }) });
+    const d = await res.json().catch(() => ({}));
+    btn.textContent = d.ok ? "sent ✓" : "failed";
+    if (!d.ok) banner("Test delivery failed: " + (d.error || "unknown error"));
+    setTimeout(() => { btn.disabled = false; btn.textContent = original; loadAlerts(); }, 1500);
+  } catch (e) { btn.disabled = false; btn.textContent = original; banner("Test failed: " + e.message); }
+}
+
+async function removeChannel(id) {
+  if (!confirm("Remove this destination? Alerts will stop being sent to it.")) return;
+  const res = await fetch(`/api/alerts/channels/${encodeURIComponent(id)}?project=${encodeURIComponent(PROJECT)}`, { method: "DELETE" });
+  if (!res.ok) { const d = await res.json().catch(() => ({})); banner(d.error || "Remove failed"); return; }
+  loadAlerts();
+}
+
+$("#addSuppBtn")?.addEventListener("click", async () => {
+  const body = {
+    project: PROJECT,
+    ruleId: $("#supRule").value.trim(),
+    category: $("#supCategory").value,
+    scopeType: "rule",
+    reason: $("#supReason").value.trim(),
+    expiresInDays: Number($("#supExpiry").value),
+  };
+  const res = await fetch("/api/alerts/suppressions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) { banner(d.error || "Could not add the rule."); return; }
+  $("#supRule").value = ""; $("#supReason").value = "";
+  loadAlerts();
+});
+
+async function removeSuppression(id) {
+  const res = await fetch(`/api/alerts/suppressions/${encodeURIComponent(id)}?project=${encodeURIComponent(PROJECT)}`, { method: "DELETE" });
+  if (!res.ok) { const d = await res.json().catch(() => ({})); banner(d.error || "Remove failed"); return; }
+  loadAlerts();
+}
 
 // ---------- Audit log ----------
 const ACTION_LABELS = {

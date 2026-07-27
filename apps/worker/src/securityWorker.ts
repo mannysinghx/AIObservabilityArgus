@@ -73,7 +73,12 @@ async function persistAndAlert(
   for (const f of findings) {
     if (f.canary_id) await markCanaryTriggered(f.canary_id);
   }
-  for (const f of findings) await maybeAlert(projectId, f, minSeverity);
+  // The content fingerprint is the dedup key: a poisoned document retrieved on
+  // every request produces a new finding each time, and paging on all of them
+  // is how a channel gets muted.
+  for (const f of findings) {
+    await maybeAlert(projectId, f, minSeverity, hashes.get(f.observation_id ?? "") ?? "");
+  }
   console.log(
     `[security-workers] raised ${findings.length} event(s): ` +
       findings.map((f) => `${f.severity}/${f.category}`).join(", "),

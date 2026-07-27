@@ -15,6 +15,7 @@ import * as Settings from "./settings.js";
 import * as Canaries from "./canaryAdmin.js";
 import * as Governance from "./dataGovernance.js";
 import { registerPublicApi } from "./publicRoutes.js";
+import * as Alerts from "./alertAdmin.js";
 import { applySecurityHeaders } from "./headers.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -501,6 +502,85 @@ export async function buildApp() {
       audit(req, "settings.updated", { orgId: g.orgId, targetType: "project", target: project, metadata: { version: r.version } });
       return r;
     } catch (err) { app.log.error({ err }, "settings write failed"); reply.code(500).send({ error: String(err) }); }
+  });
+
+  // ---------------- alert channels (view: member+, manage: admin+) ----------------
+  app.get("/api/alerts/channels", async (req, reply) => {
+    const g = await roleGate(req, reply, (req.query as ScopedQuery).project, "member");
+    if (!g) return;
+    try { return { channels: await Alerts.listChannels((req.query as ScopedQuery).project!) }; }
+    catch (err) { app.log.error({ err }, "channels list failed"); reply.code(503).send({ error: "query failed" }); }
+  });
+
+  app.post<{ Body: { project?: string; kind?: string; label?: string; target?: string; minSeverity?: string; sign?: boolean } }>(
+    "/api/alerts/channels",
+    async (req, reply) => {
+      const g = await roleGate(req, reply, req.body?.project, "admin");
+      if (!g) return;
+      try {
+        const r = await Alerts.createChannel(req.body!.project!, req.body!, userOf(req)!.email);
+        if ("error" in r) { reply.code(400).send(r); return; }
+        // The target is a credential — audit that a channel was added, never
+        // where to. An audit log that records the webhook URL leaks it.
+        audit(req, "alertchannel.created", {
+          orgId: g.orgId, targetType: "alertchannel", target: r.id,
+          metadata: { kind: req.body?.kind, label: req.body?.label, minSeverity: req.body?.minSeverity },
+        });
+        return r;
+      } catch (err) { app.log.error({ err }, "channel create failed"); reply.code(500).send({ error: "could not create channel" }); }
+    },
+  );
+
+  app.delete<{ Params: { id: string }; Querystring: ScopedQuery }>("/api/alerts/channels/:id", async (req, reply) => {
+    const g = await roleGate(req, reply, req.query.project, "admin");
+    if (!g) return;
+    const r = await Alerts.deleteChannel(req.query.project!, req.params.id);
+    if ("error" in r) { reply.code(400).send(r); return; }
+    audit(req, "alertchannel.deleted", { orgId: g.orgId, targetType: "alertchannel", target: req.params.id });
+    return r;
+  });
+
+  app.post<{ Body: { project?: string; id?: string } }>("/api/alerts/channels/test", async (req, reply) => {
+    const g = await roleGate(req, reply, req.body?.project, "admin");
+    if (!g) return;
+    try { return await Alerts.testChannel(req.body!.project!, req.body?.id || ""); }
+    catch (err) { app.log.error({ err }, "channel test failed"); reply.code(500).send({ ok: false, error: "test failed" }); }
+  });
+
+  // ---------------- suppression rules (view: member+, manage: admin+) ----------------
+  app.get("/api/alerts/suppressions", async (req, reply) => {
+    const g = await roleGate(req, reply, (req.query as ScopedQuery).project, "member");
+    if (!g) return;
+    try { return { rules: await Alerts.listSuppressions((req.query as ScopedQuery).project!) }; }
+    catch (err) { app.log.error({ err }, "suppressions failed"); reply.code(503).send({ error: "query failed" }); }
+  });
+
+  app.post<{ Body: { project?: string; ruleId?: string; category?: string; scopeType?: string; scopeValue?: string; reason?: string; expiresInDays?: number } }>(
+    "/api/alerts/suppressions",
+    async (req, reply) => {
+      const g = await roleGate(req, reply, req.body?.project, "admin");
+      if (!g) return;
+      try {
+        const r = await Alerts.createSuppression(req.body!.project!, req.body!, userOf(req)!.email);
+        if ("error" in r) { reply.code(400).send(r); return; }
+        // Suppression is a deliberate blind spot, so who created it and why is
+        // exactly what an incident review will want.
+        audit(req, "suppression.created", {
+          orgId: g.orgId, targetType: "suppression", target: r.id,
+          metadata: { ruleId: req.body?.ruleId, category: req.body?.category, reason: req.body?.reason },
+        });
+        return r;
+      } catch (err) { app.log.error({ err }, "suppression create failed"); reply.code(500).send({ error: "could not create rule" }); }
+    },
+  );
+
+  app.delete<{ Params: { id: string }; Querystring: ScopedQuery }>("/api/alerts/suppressions/:id", async (req, reply) => {
+    const g = await roleGate(req, reply, req.query.project, "admin");
+    if (!g) return;
+    const r = await Alerts.deleteSuppression(req.query.project!, req.params.id);
+    if ("error" in r) { reply.code(400).send(r); return; }
+    audit(req, "suppression.deleted", { orgId: g.orgId, targetType: "suppression", target: req.params.id });
+    return r;
   });
 
   // ---------------- data governance (view: member+, change: owner) ----------------

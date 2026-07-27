@@ -108,6 +108,7 @@
       <button class="nav-item" type="button" data-nav="settings" id="navSettings"><span class="nav-ico">⚙</span>Settings</button>
       <button class="nav-item" type="button" data-nav="keys" id="navKeys"><span class="nav-ico">⚿</span>API Keys</button>
       <button class="nav-item" type="button" data-nav="canaries" id="navCanaries"><span class="nav-ico">◈</span>Canaries</button>
+      <button class="nav-item" type="button" data-nav="alerts" id="navAlerts"><span class="nav-ico">◐</span>Alerts</button>
       <button class="nav-item" type="button" data-nav="team"><span class="nav-ico">◍</span>Team</button>
       <button class="nav-item" type="button" data-nav="audit" id="navAudit"><span class="nav-ico">≡</span>Audit log</button>
     </div>
@@ -204,6 +205,95 @@
           </div>
           <div id="newKeyBox"></div>
           <div class="tablewrap"><table id="keysTable"><tbody><tr><td class="loading">loading…</td></tr></tbody></table></div>
+        </div>
+      </section>
+
+      <!-- ALERTS -->
+      <section class="view" id="view-alerts">
+        <div class="page-head"><h1 class="page-title">Alerts</h1><span class="page-sub"><span id="alertsSub">loading…</span></span></div>
+        <div class="set-intro card" style="padding:calc(var(--u)*2.6) calc(var(--u)*3.2);font-size:12.5px;color:var(--ink-muted)">
+          Where this application's security findings get sent, and what gets kept quiet. Argus de-duplicates repeats
+          within a 15-minute window, so a poisoned document that gets retrieved on every request pages you once, not
+          once per request.
+        </div>
+
+        <div class="card" id="channelCreateCard" style="display:none">
+          <div class="card-head"><span class="card-title">Add a destination</span></div>
+          <div class="pad" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;padding:calc(var(--u)*3)">
+            <div class="field">
+              <label for="chKind" style="font-size:12px;font-weight:600">Type</label>
+              <select id="chKind" style="font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink)">
+                <option value="slack">Slack</option>
+                <option value="pagerduty">PagerDuty</option>
+                <option value="webhook">Webhook</option>
+              </select>
+            </div>
+            <div class="field" style="flex:2;min-width:240px">
+              <label for="chTarget" style="font-size:12px;font-weight:600"><span id="chTargetLabel">Slack incoming-webhook URL</span></label>
+              <input id="chTarget" type="text" placeholder="https://hooks.slack.com/services/…" style="width:100%;font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink)">
+            </div>
+            <div class="field" style="flex:1;min-width:140px">
+              <label for="chLabel" style="font-size:12px;font-weight:600">Label</label>
+              <input id="chLabel" type="text" placeholder="e.g. #security-alerts" style="width:100%;font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink)">
+            </div>
+            <div class="field">
+              <label for="chSeverity" style="font-size:12px;font-weight:600">Send at</label>
+              <select id="chSeverity" style="font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink)">
+                <option value="critical">Critical only</option>
+                <option value="high" selected>High and above</option>
+                <option value="medium">Medium and above</option>
+                <option value="low">Everything</option>
+              </select>
+            </div>
+            <button class="btn btn-primary" id="addChannelBtn" type="button" style="padding:8px 14px;font-size:12.5px">Add</button>
+          </div>
+          <div id="channelResult" style="padding:0 calc(var(--u)*3) calc(var(--u)*3)"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><span class="card-title">Destinations</span></div>
+          <div class="tablewrap"><table id="channelsTable"><tbody><tr><td class="loading">loading…</td></tr></tbody></table></div>
+        </div>
+
+        <div class="card" style="margin-top:calc(var(--u)*3)">
+          <div class="card-head"><span class="card-title">Suppression rules</span><span class="card-hint">deliberate blind spots</span></div>
+          <div class="pad" style="padding:calc(var(--u)*3) calc(var(--u)*3) 0;font-size:12.5px;color:var(--ink-muted)">
+            When a detector reliably fires on something you know is fine, silence <b>that specific thing</b> rather than
+            turning the detector off. Suppressed findings are still recorded and still visible in the Threat Center —
+            they just stop paging you. Every rule needs a reason, because an unexplained one is indistinguishable from a
+            mistake six months later and nobody dares remove it.
+          </div>
+          <div class="pad" id="suppCreate" style="display:none;gap:8px;flex-wrap:wrap;align-items:end;padding:calc(var(--u)*3)">
+            <div class="field" style="min-width:150px">
+              <label for="supRule" style="font-size:12px;font-weight:600">Rule id (optional)</label>
+              <input id="supRule" type="text" placeholder="e.g. l1-ignore-previous" style="width:100%;font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink)">
+            </div>
+            <div class="field" style="min-width:150px">
+              <label for="supCategory" style="font-size:12px;font-weight:600">or category</label>
+              <select id="supCategory" style="font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink)">
+                <option value="">—</option>
+                <option value="direct_injection">direct_injection</option>
+                <option value="jailbreak">jailbreak</option>
+                <option value="indirect_injection">indirect_injection</option>
+                <option value="obfuscation">obfuscation</option>
+                <option value="prompt_leak">prompt_leak</option>
+              </select>
+            </div>
+            <div class="field" style="flex:1;min-width:200px">
+              <label for="supReason" style="font-size:12px;font-weight:600">Why? (required)</label>
+              <input id="supReason" type="text" placeholder="e.g. our policy doc legitimately quotes injection examples" style="width:100%;font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink)">
+            </div>
+            <div class="field">
+              <label for="supExpiry" style="font-size:12px;font-weight:600">Expires</label>
+              <select id="supExpiry" style="font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink)">
+                <option value="30">in 30 days</option>
+                <option value="90">in 90 days</option>
+                <option value="0">never</option>
+              </select>
+            </div>
+            <button class="btn" id="addSuppBtn" type="button" style="padding:8px 14px;font-size:12.5px">Add rule</button>
+          </div>
+          <div class="tablewrap"><table id="suppTable"><tbody><tr><td class="loading">loading…</td></tr></tbody></table></div>
         </div>
       </section>
 

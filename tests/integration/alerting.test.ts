@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import { createHmac, randomUUID } from "node:crypto";
 import {
-  closeRateLimiter, isSuppressed, shouldSend, slackBody, pagerDutyBody, buildPayload,
+  closeSharedConnections, isSuppressed, shouldSend, slackBody, pagerDutyBody, buildPayload,
   type Finding, type SuppressionRule,
 } from "@argus/shared";
 import { buildApp } from "../../apps/web/src/app.js";
@@ -52,7 +52,7 @@ before(async () => {
 after(async () => {
   if (ready) await cleanup([T]);
   await pool.end().catch(() => {});
-  await closeRateLimiter();
+  await closeSharedConnections();
   await app?.close().catch(() => {});
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });

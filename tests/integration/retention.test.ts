@@ -14,7 +14,7 @@ import { test, before, after, describe } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
-  ch, closeRateLimiter, enforceRetention, eraseSubject, purgeProject, toChDateTime,
+  ch, closeSharedConnections, enforceRetention, eraseSubject, purgeProject, toChDateTime,
   TENANT_TABLES,
 } from "@argus/shared";
 import { infraAvailable, pool } from "./helpers.js";
@@ -27,7 +27,7 @@ before(async () => { ready = await infraAvailable(); });
 after(async () => {
   if (ready) { await purgeProject(projectA); await purgeProject(projectB); }
   await pool.end().catch(() => {});
-  await closeRateLimiter();
+  await closeSharedConnections();
 });
 
 function dbTest(name: string, fn: () => Promise<void>): void {

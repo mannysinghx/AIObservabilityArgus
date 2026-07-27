@@ -16,7 +16,7 @@ import { test, before, after, describe } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import Redis from "ioredis";
-import { config, closeRateLimiter, ensureGroup, metrics } from "@argus/shared";
+import { config, closeSharedConnections, ensureGroup, metrics } from "@argus/shared";
 import { runConsumer, DLQ_KEY } from "../../apps/worker/src/consumer.js";
 
 let r: Redis;
@@ -35,7 +35,7 @@ before(async () => {
 
 after(async () => {
   await r?.quit().catch(() => r?.disconnect());
-  await closeRateLimiter();
+  await closeSharedConnections();
 });
 
 function redisTest(name: string, fn: () => Promise<void>): void {

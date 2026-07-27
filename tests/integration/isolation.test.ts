@@ -22,7 +22,7 @@
 import { test, before, after, describe } from "node:test";
 import assert from "node:assert/strict";
 import { buildApp } from "../../apps/web/src/app.js";
-import { closeRateLimiter } from "@argus/shared";
+import { closeSharedConnections } from "@argus/shared";
 import { infraAvailable, makeTenant, cleanup, pool, type App, type Tenant } from "./helpers.js";
 
 let app: App;
@@ -41,7 +41,7 @@ before(async () => {
 after(async () => {
   if (available) await cleanup([A, B]);
   await pool.end().catch(() => {});
-  await closeRateLimiter();
+  await closeSharedConnections();
   await app?.close().catch(() => {});
 });
 

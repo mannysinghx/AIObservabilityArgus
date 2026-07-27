@@ -16,7 +16,7 @@
 import { test, before, after, describe } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { ch, closeRateLimiter, toChDateTime } from "@argus/shared";
+import { ch, closeSharedConnections, toChDateTime } from "@argus/shared";
 import { buildApp } from "../../apps/web/src/app.js";
 import { infraAvailable, makeTenant, cleanup, pool, type App, type Tenant } from "./helpers.js";
 
@@ -44,7 +44,7 @@ before(async () => {
 after(async () => {
   if (ready) await cleanup([A, B]);
   await pool.end().catch(() => {});
-  await closeRateLimiter();
+  await closeSharedConnections();
   await app?.close().catch(() => {});
 });
 

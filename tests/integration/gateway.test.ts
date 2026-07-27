@@ -15,7 +15,7 @@
 import { test, before, after, describe } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
-import { evaluate, DEFAULT_GATEWAY_POLICY, type GatewayPolicy } from "@argus/shared";
+import { closeSharedConnections, evaluate, DEFAULT_GATEWAY_POLICY, type GatewayPolicy } from "@argus/shared";
 
 let server: Server;
 let port = 0;
@@ -49,6 +49,9 @@ before(async () => {
 });
 
 after(async () => {
+  // Consistent with the other integration files: any lazily-created shared
+  // connection has to be released or this process never exits.
+  await closeSharedConnections();
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });
 

@@ -90,8 +90,21 @@ export function expireEpochCache(): void {
  * subscriber mode cannot serve normal commands, and the shared one is busy
  * doing XADD on the ingest hot path.
  */
+// Tracked so it can be closed. A subscriber connection is long-lived by nature,
+// which makes it exactly the kind of handle that silently outlives the process
+// that created it.
+const subscribers = new Set<Redis>();
+
+/** Close every subscriber connection. */
+export async function closeKeyEventSubscribers(): Promise<void> {
+  const all = [...subscribers];
+  subscribers.clear();
+  await Promise.all(all.map((s) => s.quit().catch(() => s.disconnect())));
+}
+
 export function subscribeKeyRevoked(onRevoked: (projectId: string) => void): Redis {
   const sub = new Redis(config.redisUrl, { maxRetriesPerRequest: null, lazyConnect: false });
+  subscribers.add(sub);
   sub.on("error", () => { /* reconnects on its own; don't crash ingest over this */ });
   void sub.subscribe(KEY_REVOKED_CHANNEL);
   sub.on("message", (channel, message) => {

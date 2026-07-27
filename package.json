@@ -2,7 +2,7 @@
   "name": "argus",
   "private": true,
   "version": "0.1.0",
-  "description": "Argus — security-first AI observability platform",
+  "description": "Argus \u2014 security-first AI observability platform",
   "workspaces": [
     "packages/*",
     "apps/*"
@@ -12,7 +12,7 @@
     "worker": "npm --workspace @argus/worker run dev",
     "typecheck": "tsc -b --pretty",
     "test": "tsx --test tests/*.test.ts",
-    "test:isolation": "tsx --test --test-concurrency=1 --test-timeout=60000 tests/integration/*.test.ts"
+    "test:isolation": "tsx --test --test-concurrency=1 --test-timeout=600000 tests/integration/*.test.ts"
   },
   "engines": {
     "node": ">=20"

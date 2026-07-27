@@ -184,3 +184,18 @@ export async function cleanup(tenants: Tenant[]): Promise<void> {
     await pool.query("DELETE FROM organizations WHERE id = $1", [t.orgId]).catch(() => {});
   }
 }
+
+/**
+ * A note on timeouts.
+ *
+ * `--test-timeout` in the `test:isolation` script is deliberately generous (10
+ * minutes). node:test applies that budget to the *file* as well as to each
+ * test, so a value sized for an individual assertion silently becomes a cap on
+ * the whole file — which is how a suite where every assertion passes still
+ * reports failure. It happened: 60s was ample locally and three files exceeded
+ * it on a CI runner with cold database containers.
+ *
+ * The number is not a performance target. It exists only so a genuine hang
+ * eventually fails instead of burning the job's wall clock, and it should stay
+ * far above the slowest plausible run rather than close to the observed one.
+ */

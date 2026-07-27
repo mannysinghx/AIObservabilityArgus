@@ -107,6 +107,8 @@
       <div class="nav-label">Manage</div>
       <button class="nav-item" type="button" data-nav="settings" id="navSettings"><span class="nav-ico">⚙</span>Settings</button>
       <button class="nav-item" type="button" data-nav="keys" id="navKeys"><span class="nav-ico">⚿</span>API Keys</button>
+      <button class="nav-item" type="button" data-nav="canaries" id="navCanaries"><span class="nav-ico">◈</span>Canaries</button>
+      <button class="nav-item" type="button" data-nav="alerts" id="navAlerts"><span class="nav-ico">◐</span>Alerts</button>
       <button class="nav-item" type="button" data-nav="team"><span class="nav-ico">◍</span>Team</button>
       <button class="nav-item" type="button" data-nav="audit" id="navAudit"><span class="nav-ico">≡</span>Audit log</button>
     </div>
@@ -179,9 +181,160 @@
       <section class="view" id="view-keys">
         <div class="page-head"><h1 class="page-title">API Keys</h1><span class="page-sub"><span id="keysSub">loading…</span></span></div>
         <div class="card">
-          <div class="card-head"><span class="card-title">Keys for this application</span><button class="btn btn-primary" id="createKeyBtn" type="button" style="padding:6px 12px;font-size:12px">Create key</button></div>
+          <div class="card-head"><span class="card-title">Keys for this application</span></div>
+          <div class="pad" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;padding:calc(var(--u)*3) calc(var(--u)*3) 0">
+            <div class="field" style="flex:1;min-width:180px">
+              <label for="keyLabel" style="font-size:12px;font-weight:600">What is this key for?</label>
+              <input id="keyLabel" type="text" placeholder="e.g. production backend" style="width:100%;font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink)">
+            </div>
+            <div class="field">
+              <label for="keyScope" style="font-size:12px;font-weight:600">Access</label>
+              <select id="keyScope" style="font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink)">
+                <option value="ingest" selected>Send data (ingest)</option>
+                <option value="read">Read data (API)</option>
+                <option value="ingest,read">Both</option>
+              </select>
+            </div>
+            <button class="btn btn-primary" id="createKeyBtn" type="button" style="padding:8px 14px;font-size:12.5px">Create key</button>
+          </div>
+          <div class="pad" style="padding:calc(var(--u)*1.5) calc(var(--u)*3) 0;font-size:12px;color:var(--ink-muted)">
+            An <b>ingest</b> key only adds telemetry — it can't read anything back, which is what you want for a credential
+            deployed across every host running your app. A <b>read</b> key powers the <span class="mono">/v1</span> API:
+            your own dashboards, a SIEM connector, scheduled exports. Keep them separate so a leaked ingest key can't be
+            used to download everything it ever sent.
+          </div>
           <div id="newKeyBox"></div>
           <div class="tablewrap"><table id="keysTable"><tbody><tr><td class="loading">loading…</td></tr></tbody></table></div>
+        </div>
+      </section>
+
+      <!-- ALERTS -->
+      <section class="view" id="view-alerts">
+        <div class="page-head"><h1 class="page-title">Alerts</h1><span class="page-sub"><span id="alertsSub">loading…</span></span></div>
+        <div class="set-intro card" style="padding:calc(var(--u)*2.6) calc(var(--u)*3.2);font-size:12.5px;color:var(--ink-muted)">
+          Where this application's security findings get sent, and what gets kept quiet. Argus de-duplicates repeats
+          within a 15-minute window, so a poisoned document that gets retrieved on every request pages you once, not
+          once per request.
+        </div>
+
+        <div class="card" id="channelCreateCard" style="display:none">
+          <div class="card-head"><span class="card-title">Add a destination</span></div>
+          <div class="pad" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;padding:calc(var(--u)*3)">
+            <div class="field">
+              <label for="chKind" style="font-size:12px;font-weight:600">Type</label>
+              <select id="chKind" style="font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink)">
+                <option value="slack">Slack</option>
+                <option value="pagerduty">PagerDuty</option>
+                <option value="webhook">Webhook</option>
+              </select>
+            </div>
+            <div class="field" style="flex:2;min-width:240px">
+              <label for="chTarget" style="font-size:12px;font-weight:600"><span id="chTargetLabel">Slack incoming-webhook URL</span></label>
+              <input id="chTarget" type="text" placeholder="https://hooks.slack.com/services/…" style="width:100%;font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink)">
+            </div>
+            <div class="field" style="flex:1;min-width:140px">
+              <label for="chLabel" style="font-size:12px;font-weight:600">Label</label>
+              <input id="chLabel" type="text" placeholder="e.g. #security-alerts" style="width:100%;font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink)">
+            </div>
+            <div class="field">
+              <label for="chSeverity" style="font-size:12px;font-weight:600">Send at</label>
+              <select id="chSeverity" style="font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink)">
+                <option value="critical">Critical only</option>
+                <option value="high" selected>High and above</option>
+                <option value="medium">Medium and above</option>
+                <option value="low">Everything</option>
+              </select>
+            </div>
+            <button class="btn btn-primary" id="addChannelBtn" type="button" style="padding:8px 14px;font-size:12.5px">Add</button>
+          </div>
+          <div id="channelResult" style="padding:0 calc(var(--u)*3) calc(var(--u)*3)"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><span class="card-title">Destinations</span></div>
+          <div class="tablewrap"><table id="channelsTable"><tbody><tr><td class="loading">loading…</td></tr></tbody></table></div>
+        </div>
+
+        <div class="card" style="margin-top:calc(var(--u)*3)">
+          <div class="card-head"><span class="card-title">Suppression rules</span><span class="card-hint">deliberate blind spots</span></div>
+          <div class="pad" style="padding:calc(var(--u)*3) calc(var(--u)*3) 0;font-size:12.5px;color:var(--ink-muted)">
+            When a detector reliably fires on something you know is fine, silence <b>that specific thing</b> rather than
+            turning the detector off. Suppressed findings are still recorded and still visible in the Threat Center —
+            they just stop paging you. Every rule needs a reason, because an unexplained one is indistinguishable from a
+            mistake six months later and nobody dares remove it.
+          </div>
+          <div class="pad" id="suppCreate" style="display:none;gap:8px;flex-wrap:wrap;align-items:end;padding:calc(var(--u)*3)">
+            <div class="field" style="min-width:150px">
+              <label for="supRule" style="font-size:12px;font-weight:600">Rule id (optional)</label>
+              <input id="supRule" type="text" placeholder="e.g. l1-ignore-previous" style="width:100%;font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink)">
+            </div>
+            <div class="field" style="min-width:150px">
+              <label for="supCategory" style="font-size:12px;font-weight:600">or category</label>
+              <select id="supCategory" style="font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink)">
+                <option value="">—</option>
+                <option value="direct_injection">direct_injection</option>
+                <option value="jailbreak">jailbreak</option>
+                <option value="indirect_injection">indirect_injection</option>
+                <option value="obfuscation">obfuscation</option>
+                <option value="prompt_leak">prompt_leak</option>
+              </select>
+            </div>
+            <div class="field" style="flex:1;min-width:200px">
+              <label for="supReason" style="font-size:12px;font-weight:600">Why? (required)</label>
+              <input id="supReason" type="text" placeholder="e.g. our policy doc legitimately quotes injection examples" style="width:100%;font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink)">
+            </div>
+            <div class="field">
+              <label for="supExpiry" style="font-size:12px;font-weight:600">Expires</label>
+              <select id="supExpiry" style="font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink)">
+                <option value="30">in 30 days</option>
+                <option value="90">in 90 days</option>
+                <option value="0">never</option>
+              </select>
+            </div>
+            <button class="btn" id="addSuppBtn" type="button" style="padding:8px 14px;font-size:12.5px">Add rule</button>
+          </div>
+          <div class="tablewrap"><table id="suppTable"><tbody><tr><td class="loading">loading…</td></tr></tbody></table></div>
+        </div>
+      </section>
+
+      <!-- CANARIES -->
+      <section class="view" id="view-canaries">
+        <div class="page-head"><h1 class="page-title">Canaries</h1><span class="page-sub"><span id="canariesSub">loading…</span></span></div>
+        <div class="set-intro card" style="padding:calc(var(--u)*2.6) calc(var(--u)*3.2);font-size:12.5px;color:var(--ink-muted)">
+          A <b>canary</b> is a unique marker you plant somewhere it should never travel from — a system prompt, an internal
+          document, a customer record. Every other detector on this platform reads text and makes a judgement about intent,
+          and a judgement can be argued with. A canary firing is not a judgement: this exact string was somewhere it could
+          only have come from, and it has now turned up in something your app sent outward.
+          <b>There is no benign explanation.</b> This is the one alert worth waking someone up for.
+          <div style="margin-top:10px">Argus watches model outputs and tool calls. It deliberately does <b>not</b> alert when a
+          canary comes back from a search or retrieval step — finding it in a document you planted it in is the system working.</div>
+        </div>
+        <div class="card" id="canaryCreateCard" style="display:none">
+          <div class="card-head"><span class="card-title">Plant a canary</span></div>
+          <div class="pad" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;padding:calc(var(--u)*3)">
+            <div class="field" style="flex:1;min-width:220px">
+              <label for="canaryLabel" style="font-size:12px;font-weight:600">Where are you planting it?</label>
+              <input id="canaryLabel" type="text" placeholder="e.g. production system prompt" style="font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink);width:100%">
+            </div>
+            <button class="btn btn-primary" id="createCanaryBtn" type="button" style="padding:8px 14px;font-size:12.5px">Generate canary</button>
+          </div>
+          <details style="padding:0 calc(var(--u)*3) calc(var(--u)*3);font-size:12px;color:var(--ink-muted)">
+            <summary style="cursor:pointer">Use a marker I've already planted instead</summary>
+            <p style="margin:8px 0">If you've already seeded something — a decoy API key, a fake employee record — enter it here and
+            Argus will watch for that exact string.</p>
+            <p style="margin:8px 0"><b>Note the trade-off.</b> A generated canary is stored only as a hash: Argus can detect it
+            without ever holding it, so a breach of this database doesn't reveal your markers. A value you supply has to be
+            stored as-is, because there's no other way to match an arbitrary string.</p>
+            <div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap">
+              <input id="canaryCustom" type="text" placeholder="your existing marker (min 12 characters)" style="flex:1;min-width:240px;font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink)">
+              <button class="btn" id="createCustomCanaryBtn" type="button" style="padding:8px 14px;font-size:12.5px">Register marker</button>
+            </div>
+          </details>
+          <div id="newCanaryBox"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><span class="card-title">Planted canaries</span></div>
+          <div class="tablewrap"><table id="canariesTable"><tbody><tr><td class="loading">loading…</td></tr></tbody></table></div>
         </div>
       </section>
 
@@ -262,15 +415,54 @@
         </div>
 
         <div class="card">
-          <div class="card-head"><span class="card-title">Enforcement</span><span class="card-hint">roadmap</span></div>
+          <div class="card-head"><span class="card-title">Enforcement</span><span class="card-hint">optional gateway</span></div>
           <div class="pad" style="padding:calc(var(--u)*3.2);font-size:12.5px;color:var(--ink-muted)">
-            Argus currently runs in <b>Observe</b> mode — it records and alerts, off your app's critical path, so it can never add latency or block a request. <b>Inline blocking</b> (stopping a prompt injection before your model sees it) requires the optional gateway and will appear here when it ships.
+            By default Argus runs in <b>Observe</b> mode — it records and alerts from beside your app's critical path, so it can
+            never add latency or fail a request.
+            <div style="margin-top:10px"><b>Inline blocking</b> is available through the optional <b>gateway</b>: point your
+            OpenAI SDK's <span class="mono">base_url</span> at it and Argus can refuse a high-confidence prompt injection before
+            your model ever sees it. It fails open by design — if detection is slow or down, your request goes through.</div>
+            <div style="margin-top:10px">Run it in observe mode first and watch what <i>would</i> have been blocked here in the
+            Threat Center. Setup is in <span class="mono">docs/12-gateway.md</span>.</div>
           </div>
         </div>
 
         <div class="set-actions" style="display:flex;align-items:center;gap:14px;padding:0 calc(var(--u)*1)">
           <button class="btn btn-primary" id="saveSettingsBtn" type="button" style="padding:8px 16px;font-size:13px">Save settings</button>
           <span id="settingsSaveNote" class="dim" style="font-size:12px"></span>
+        </div>
+
+        <!-- Data governance. Separate card, owner-only, and visually set apart
+             from the tuning above because everything here destroys data. -->
+        <div class="card" id="governanceCard" style="margin-top:calc(var(--u)*4);border-color:var(--sev-high)">
+          <div class="card-head"><span class="card-title">Data retention &amp; erasure</span><span class="card-hint">owners only · irreversible</span></div>
+          <div class="pad" style="display:grid;gap:calc(var(--u)*3.5);padding:calc(var(--u)*3.2)">
+            <div class="set-row">
+              <div class="set-label"><label for="setRetention">Keep data for</label><span class="set-hint">
+                Traces, spans, security events, eval scores and the raw ingest archive are deleted permanently once they pass this age.
+                Saving applies the new window <b>immediately</b> — if you shorten it, data outside it is gone straight away.
+                Set to <b>0</b> to keep everything forever.</span></div>
+              <div class="set-control" style="display:flex;align-items:center;gap:10px">
+                <input id="setRetention" type="number" min="0" max="3650" step="1" value="30" style="width:110px;font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink)">
+                <span class="dim" style="font-size:12px">days</span>
+                <button class="btn" id="saveRetentionBtn" type="button" style="padding:6px 12px;font-size:12px">Apply</button>
+                <span id="retentionNote" class="dim" style="font-size:12px"></span>
+              </div>
+            </div>
+
+            <div class="set-row">
+              <div class="set-label"><label for="eraseUserId">Erase one person's data</label><span class="set-hint">
+                For a deletion request under GDPR, CCPA or similar. Enter the value your app sends as <span class="mono">userId</span>.
+                Every trace for that person — prompts, completions, tool calls, security events — is deleted across all tables.
+                Check the count before you confirm; a mistyped id matches nothing and looks the same as success.</span></div>
+              <div class="set-control" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                <input id="eraseUserId" type="text" placeholder="user id" style="min-width:200px;font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink)">
+                <button class="btn" id="previewEraseBtn" type="button" style="padding:6px 12px;font-size:12px">Check</button>
+                <button class="btn" id="eraseBtn" type="button" style="padding:6px 12px;font-size:12px;color:var(--sev-critical);display:none">Erase permanently</button>
+                <span id="eraseNote" class="dim" style="font-size:12px"></span>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -731,7 +923,7 @@
               </div>
 
               <div class="callout"><b>Just want to prove the key works first?</b> The <b>Quick test</b> tab on the Connect screen gives you a one-line <code>curl</code> command you can run from any computer with internet access — it doesn't need to be where your app runs, and it touches nothing in your real app. When the status flips to Connected, you know your key and network path are good.</div>
-              <button class="btn btn-primary open-page" type="button" onclick="location.href='/onboard.html'">Open Connect a new app →</button>
+              <button class="btn btn-primary open-page" type="button" data-href="/onboard.html">Open Connect a new app →</button>
             </article>
 
             <article class="guide-sec" id="g-globalnav">

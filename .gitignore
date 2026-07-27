@@ -26,3 +26,6 @@ venv/
 # data
 /data/
 *.log
+
+# Python virtualenv for the detection service
+services/detection/.venv/

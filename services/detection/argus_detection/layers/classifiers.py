@@ -9,7 +9,11 @@ pipeline simply skips L2 — the service still runs.
 """
 from __future__ import annotations
 
+import logging
+
 from ..models import LayerResult, Observation, TaintClass
+
+log = logging.getLogger("argus.detection.l2")
 
 # Default ensemble (HF ids). Both are wrapped behind the same interface; scores
 # are max-pooled across chunks and averaged across models (see scan()).
@@ -24,12 +28,11 @@ _OVERLAP = 128
 
 def available() -> bool:
     try:
-        import transformers  # noqa: F401
         import torch  # noqa: F401
-
-        return True
-    except Exception:
+        import transformers  # noqa: F401
+    except ImportError:
         return False
+    return True
 
 
 def _chunks(text: str, size: int = _CHUNK, overlap: int = _OVERLAP):
@@ -98,12 +101,17 @@ def scan(
         try:
             pipe = _registry.get(model_id)
         except Exception:
-            continue  # a single bad model shouldn't kill the layer
+            # A single bad model must not take out the layer, but it must not be
+            # silent either: "L2 enabled" plus a model that never loads looks
+            # exactly like "L2 enabled and nothing is malicious".
+            log.warning("L2 model %s unavailable; skipping it for this scan", model_id, exc_info=True)
+            continue
         best = 0.0
         for chunk in _chunks(text):
             try:
                 out = pipe(chunk)
             except Exception:
+                log.warning("L2 model %s failed on a chunk; scoring the rest", model_id, exc_info=True)
                 continue
             best = max(best, _injection_prob(out if isinstance(out, list) else [out]))
         per_model[model_id.split("/")[-1]] = round(best, 4)

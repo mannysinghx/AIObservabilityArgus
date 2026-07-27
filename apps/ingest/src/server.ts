@@ -8,6 +8,10 @@ import {
   otlpToObservations,
   loadProjectConfig,
   redactObservation,
+  rateLimit,
+  LIMITS,
+  metrics,
+  refreshQueueMetrics,
   type OtlpTracePayload,
   type StreamEvent,
   type ObservationInput,
@@ -64,7 +68,7 @@ async function pushEvents(projectId: string, batch: IngestBatch): Promise<number
 // ---- auth guard ----
 app.decorateRequest("projectId", "");
 app.addHook("preHandler", async (req, reply) => {
-  if (req.url === "/health") return;
+  if (req.url === "/health" || req.url === "/metrics") return;
   const header = req.headers.authorization;
 
   // Preferred: a single write-only ingest key — `Authorization: Bearer ak_live_…`.
@@ -80,13 +84,43 @@ app.addHook("preHandler", async (req, reply) => {
   }
 
   if (!project) {
+    // Unauthenticated attempts are limited by IP so a stolen-key hunt or a
+    // credential-stuffing sweep can't run at line rate against Postgres.
+    await rateLimit(`ingest-auth:${req.ip}`, 60, 60_000);
     reply.code(401).send({ error: "invalid or missing credentials — send 'Authorization: Bearer <ingest key>'" });
     return;
   }
+
+  // Per-project quota. Telemetry ingest is the one endpoint a customer's own
+  // code calls in a loop, so a runaway retry in *their* app is the realistic
+  // failure — it fills ClickHouse and the Redis stream for every other tenant
+  // sharing the deployment. Limiting by project (not IP) is what makes this a
+  // noisy-neighbour control rather than an anti-abuse one.
+  const quota = await rateLimit(`ingest:${project.projectId}`, LIMITS.ingest.limit, LIMITS.ingest.windowMs);
+  if (!quota.allowed) {
+    reply
+      .code(429)
+      .header("retry-after", String(Math.ceil(quota.resetMs / 1000)))
+      .send({ error: "ingest rate limit exceeded for this project", retryAfterMs: quota.resetMs });
+    metrics.inc("argus_ingest_rate_limited_total", { project: project.projectId });
+    return;
+  }
+
   (req as unknown as { projectId: string }).projectId = project.projectId;
 });
 
 app.get("/health", async () => ({ status: "ok", service: "argus-ingest" }));
+
+/**
+ * Prometheus scrape target. Deliberately outside the auth hook (which skips
+ * /health and now /metrics): a scraper has no API key, and the numbers here are
+ * counts and latencies, never customer content. Put it behind your network
+ * policy the same way you would any other /metrics.
+ */
+app.get("/metrics", async (_req, reply) => {
+  await refreshQueueMetrics().catch(() => {});
+  reply.header("content-type", "text/plain; version=0.0.4").send(metrics.render());
+});
 
 /**
  * Native / Langfuse-style batch endpoint. Body: { traces[], observations[] }.
@@ -100,6 +134,7 @@ app.post("/api/public/ingestion", async (req, reply) => {
     return;
   }
   const n = await pushEvents(projectId, parsed.data);
+  metrics.inc("argus_ingest_events_total", { endpoint: "native" }, n, "Telemetry events accepted");
   reply.code(202).send({ accepted: n });
 });
 
@@ -120,6 +155,7 @@ app.post("/v1/traces", async (req, reply) => {
     traces: [],
     observations,
   } as unknown as IngestBatch);
+  metrics.inc("argus_ingest_events_total", { endpoint: "otlp" }, n, "Telemetry events accepted");
   reply.code(202).send({ partialSuccess: {}, accepted: n });
 });
 

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import pg from "pg";
-import { config } from "@argus/shared";
+import { config, expireEpochCache, keyEpoch, subscribeKeyRevoked } from "@argus/shared";
 
 const pool = new pg.Pool({ connectionString: config.databaseUrl, max: 4 });
 
@@ -10,8 +10,24 @@ export interface AuthedProject {
 }
 
 // Small in-process cache so we don't hit Postgres on every ingest request.
-const cache = new Map<string, { project: AuthedProject; expires: number }>();
+const cache = new Map<string, { project: AuthedProject; expires: number; epoch: number }>();
 const TTL_MS = 60_000;
+
+// Revocation must not wait for the TTL. When the dashboard revokes a key it
+// announces the affected project and we drop those entries immediately; the
+// next request for that project re-reads Postgres and finds the key gone.
+// Entries are dropped by project rather than by key hash because the cache is
+// keyed by credential, and the credential is precisely what we no longer have.
+subscribeKeyRevoked((projectId) => {
+  expireEpochCache();
+  if (!projectId) {
+    cache.clear();
+    return;
+  }
+  for (const [k, v] of cache) {
+    if (v.project.projectId === projectId) cache.delete(k);
+  }
+});
 
 function sha256(s: string): string {
   return createHash("sha256").update(s).digest("hex");
@@ -27,8 +43,9 @@ export async function authenticate(
   secret: string,
 ): Promise<AuthedProject | null> {
   const cacheKey = `${publicKey}:${sha256(secret)}`;
+  const epoch = await keyEpoch();
   const hit = cache.get(cacheKey);
-  if (hit && hit.expires > Date.now()) return hit.project;
+  if (hit && hit.expires > Date.now() && hit.epoch === epoch) return hit.project;
 
   const res = await pool.query(
     `SELECT project_id, secret_hash FROM api_keys WHERE public_key = $1 LIMIT 1`,
@@ -39,7 +56,7 @@ export async function authenticate(
   if (row.secret_hash !== sha256(secret)) return null;
 
   const project: AuthedProject = { projectId: row.project_id, publicKey };
-  cache.set(cacheKey, { project, expires: Date.now() + TTL_MS });
+  cache.set(cacheKey, { project, expires: Date.now() + TTL_MS, epoch });
   // best-effort last-used stamp
   pool
     .query(`UPDATE api_keys SET last_used_at = now() WHERE public_key = $1`, [publicKey])
@@ -56,8 +73,9 @@ export async function authenticate(
 export async function authenticateToken(token: string): Promise<AuthedProject | null> {
   const hash = sha256(token);
   const cacheKey = `tok:${hash}`;
+  const epoch = await keyEpoch();
   const hit = cache.get(cacheKey);
-  if (hit && hit.expires > Date.now()) return hit.project;
+  if (hit && hit.expires > Date.now() && hit.epoch === epoch) return hit.project;
 
   const res = await pool.query(
     `SELECT project_id, public_key FROM api_keys WHERE token_hash = $1 LIMIT 1`,
@@ -67,7 +85,7 @@ export async function authenticateToken(token: string): Promise<AuthedProject | 
   const row = res.rows[0];
 
   const project: AuthedProject = { projectId: row.project_id, publicKey: row.public_key };
-  cache.set(cacheKey, { project, expires: Date.now() + TTL_MS });
+  cache.set(cacheKey, { project, expires: Date.now() + TTL_MS, epoch });
   pool
     .query(`UPDATE api_keys SET last_used_at = now() WHERE token_hash = $1`, [hash])
     .catch(() => {});

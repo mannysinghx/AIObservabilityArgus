@@ -25,13 +25,30 @@ from ..models import Category, LayerResult, Observation, RuleMatch, TaintClass
 _RULES_DIR = Path(__file__).resolve().parent.parent / "rules"
 
 # Unicode ranges we treat as invisible/format control (subset that matters).
+#
+# Written as escapes rather than literals on purpose. This is the one file whose
+# *contents* are the characters it hunts for, so pasting them raw makes the
+# source unreadable, makes diffs meaningless, and makes it impossible to tell a
+# deliberate entry from one that arrived by accident. The comment names each
+# codepoint; the escape is what a reviewer can actually check.
 _INVISIBLE = {
-    "​", "‌", "‍", "⁠", "﻿",  # zero-width family
-    "­",  # soft hyphen
+    "\u200b",  # ZERO WIDTH SPACE
+    "\u200c",  # ZERO WIDTH NON-JOINER
+    "\u200d",  # ZERO WIDTH JOINER
+    "\u2060",  # WORD JOINER
+    "\ufeff",  # ZERO WIDTH NO-BREAK SPACE / BOM
+    "\u00ad",  # SOFT HYPHEN
 }
 _BIDI_CONTROL = {
-    "‪", "‫", "‬", "‭", "‮",  # LRE RLE PDF LRO RLO
-    "⁦", "⁧", "⁨", "⁩",            # isolates
+    "\u202a",  # LEFT-TO-RIGHT EMBEDDING
+    "\u202b",  # RIGHT-TO-LEFT EMBEDDING
+    "\u202c",  # POP DIRECTIONAL FORMATTING
+    "\u202d",  # LEFT-TO-RIGHT OVERRIDE
+    "\u202e",  # RIGHT-TO-LEFT OVERRIDE
+    "\u2066",  # LEFT-TO-RIGHT ISOLATE
+    "\u2067",  # RIGHT-TO-LEFT ISOLATE
+    "\u2068",  # FIRST STRONG ISOLATE
+    "\u2069",  # POP DIRECTIONAL ISOLATE
 }
 _ENCODED_BLOB = re.compile(r"(?:[A-Za-z0-9+/]{40,}={0,2}|(?:[0-9a-fA-F]{2}){24,})")
 
@@ -103,11 +120,9 @@ def _is_reported(text: str, start: int, end: int) -> bool:
     before_stripped = window_before.rstrip()
     if before_stripped and before_stripped[-1] in _QUOTE_CHARS:
         return True
-    if any(q in window_after for q in _QUOTE_CHARS) and any(
+    return any(q in window_after for q in _QUOTE_CHARS) and any(
         q in window_before for q in _QUOTE_CHARS
-    ):
-        return True
-    return False
+    )
 
 
 # ---- structural `kind` checks --------------------------------------------

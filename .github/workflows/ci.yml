@@ -28,7 +28,7 @@ jobs:
         run: pytest -q
 
   typecheck:
-    name: TypeScript typecheck
+    name: TypeScript typecheck + unit tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -37,3 +37,58 @@ jobs:
           node-version: "20"
       - run: npm install
       - run: npx tsc -b --pretty
+      # Unit tests need no services: the rate limiter falls back to an
+      # in-process counter when Redis is absent, which is the branch that
+      # matters most anyway.
+      - name: Unit tests
+        run: npm test
+
+  isolation:
+    name: Tenant isolation
+    runs-on: ubuntu-latest
+    # These are the tests that would have caught every cross-tenant leak in this
+    # repo's history. They need real databases, so they get their own job.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: argus
+          POSTGRES_USER: argus
+          POSTGRES_PASSWORD: argus
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U argus" --health-interval 5s
+          --health-timeout 3s --health-retries 20
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.8
+        env:
+          CLICKHOUSE_DB: argus
+          CLICKHOUSE_USER: argus
+          CLICKHOUSE_PASSWORD: argus
+        ports: ["8123:8123"]
+        options: >-
+          --health-cmd "wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s
+          --health-timeout 3s --health-retries 20
+    env:
+      DATABASE_URL: postgres://argus:argus@localhost:5432/argus
+      CLICKHOUSE_HTTP_URL: http://localhost:8123
+      CLICKHOUSE_DB: argus
+      CLICKHOUSE_USER: argus
+      CLICKHOUSE_PASSWORD: argus
+      REDIS_URL: redis://localhost:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install
+      - name: Migrate
+        run: node scripts/migrate.mjs
+      - name: Integration tests (isolation, canaries, retention, API, alerting, consumer, gateway)
+        run: npm run test:isolation

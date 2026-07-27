@@ -12,6 +12,9 @@ export const config = {
 
   detectionUrl: process.env.DETECTION_URL ?? "http://localhost:8000",
   detectionEnableL2: (process.env.DETECTION_ENABLE_L2 ?? "false") === "true",
+  // Shared secret between worker and detection service. Empty = detection is
+  // unauthenticated (it warns at startup); set the same value on both.
+  detectionApiKey: process.env.DETECTION_API_KEY ?? "",
 
   // PORT is the platform-provided variable on Railway/Render/Fly; INGEST_PORT
   // is the explicit local override.

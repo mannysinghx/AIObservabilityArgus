@@ -6,8 +6,9 @@
  */
 import { DEFAULT_DETECTION_CONFIG, mergeConfig, type DetectionConfig } from "@argus/shared";
 import { pool } from "./db.js";
+import { safeProjectId } from "./ids.js";
 
-const safeId = (id: string): string => String(id || "").replace(/[^a-zA-Z0-9-]/g, "");
+
 
 export interface SettingsView {
   config: DetectionConfig;
@@ -18,7 +19,7 @@ export interface SettingsView {
 
 /** Current settings for a project, defaults applied. Never throws on a missing row. */
 export async function getSettings(projectId: string): Promise<SettingsView> {
-  const safe = safeId(projectId);
+  const safe = safeProjectId(projectId);
   const { rows } = await pool.query<{
     config: unknown; version: number; updated_at: Date | null; updated_by: string | null;
   }>(
@@ -44,7 +45,7 @@ export async function updateSettings(
   incoming: unknown,
   updatedBy: string,
 ): Promise<SettingsView> {
-  const safe = safeId(projectId);
+  const safe = safeProjectId(projectId);
   const clean = mergeConfig(incoming);
   const { rows } = await pool.query<{ version: number; updated_at: Date }>(
     `INSERT INTO detection_configs (project_id, config, version, updated_by, updated_at)

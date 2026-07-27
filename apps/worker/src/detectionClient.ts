@@ -1,6 +1,14 @@
-import { config, type Finding, type ObservationInput } from "@argus/shared";
+import { config, contentOf, type CanaryRef, type Finding, type ObservationInput } from "@argus/shared";
 
 /** Thin client for the Python detection service (services/detection). */
+
+/** Auth header for detection calls. Omitted entirely when no key is configured,
+ *  so this stays compatible with a detection service that has none. */
+function detectionHeaders(): Record<string, string> {
+  const h: Record<string, string> = { "content-type": "application/json" };
+  if (config.detectionApiKey) h.authorization = `Bearer ${config.detectionApiKey}`;
+  return h;
+}
 
 interface ScanObsBody {
   project_id: string;
@@ -19,18 +27,6 @@ interface ScanObsBody {
   };
   tool_overrides: Record<string, string>;
   enable_l2: boolean;
-}
-
-function contentOf(o: ObservationInput): string {
-  // The security-relevant text depends on span type:
-  //  - generation/retrieval: the produced text (completion / retrieved chunk)
-  //  - tool: BOTH arguments (input) and result (output) — exfiltration lives in
-  //    the arguments (recipient, body, URL), which a result-only view misses
-  //  - span/event/user: whatever text is present
-  if (o.type === "generation" || o.type === "retrieval") {
-    return o.output || o.input;
-  }
-  return [o.input, o.output].filter(Boolean).join("\n");
 }
 
 export function toScanObs(projectId: string, o: ObservationInput, enableL2: boolean): ScanObsBody {
@@ -63,7 +59,7 @@ export async function scanObservation(
 ): Promise<Finding[]> {
   const res = await fetch(`${config.detectionUrl}/v1/scan`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: detectionHeaders(),
     body: JSON.stringify(toScanObs(projectId, o, enableL2)),
   });
   if (!res.ok) throw new Error(`detection /v1/scan ${res.status}`);
@@ -75,11 +71,20 @@ export async function scanTrace(
   projectId: string,
   traceId: string,
   observations: ObservationInput[],
-  canaries: string[] = [],
+  canaryRefs: CanaryRef[] = [],
 ): Promise<Finding[]> {
   const body = {
     project_id: projectId,
     trace_id: traceId,
+    // Generated canaries travel as hashes only. The detection service handles
+    // hostile text all day; anything it doesn't hold, it can't leak.
+    canary_refs: canaryRefs.map((c) => ({
+      id: c.id,
+      label: c.label,
+      kind: c.kind,
+      token_hash: c.tokenHash,
+      value: c.value,
+    })),
     observations: observations.map((o) => ({
       observation_id: o.observationId,
       trace_id: o.traceId,
@@ -94,11 +99,10 @@ export async function scanTrace(
       attributes: o.attributes ?? {},
     })),
     tool_overrides: {},
-    canaries,
   };
   const res = await fetch(`${config.detectionUrl}/v1/scan/trace`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: detectionHeaders(),
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`detection /v1/scan/trace ${res.status}`);

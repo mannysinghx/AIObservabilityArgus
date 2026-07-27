@@ -1,6 +1,7 @@
-import { ch } from "@argus/shared";
+import { ch, publishKeyRevoked, purgeProject } from "@argus/shared";
 import { pool } from "./db.js";
 import { listProjectsWithStats } from "./onboarding.js";
+import { safeProjectId } from "./ids.js";
 
 // Platform-operator (super-admin) queries and mutations — cross-tenant. Every
 // route that calls these is gated to platform admins in server.ts.
@@ -146,15 +147,18 @@ export async function renameOrg(orgId: string, name: string): Promise<{ ok: true
  *  (which cascades projects, keys, configs, memberships). Irreversible. */
 export async function deleteOrg(orgId: string): Promise<{ ok: true; projectsPurged: number }> {
   const { rows } = await pool.query<{ id: string }>("SELECT id FROM projects WHERE org_id = $1", [orgId]);
-  const projectIds = rows.map((r) => r.id.replace(/[^a-zA-Z0-9-]/g, ""));
-  if (projectIds.length) {
-    const list = projectIds.map((id) => `'${id}'`).join(",");
-    // `scores` is tenant data too — it was omitted here, so a deleted customer's
-    // eval/annotation rows survived the purge.
-    for (const tbl of ["traces", "observations", "security_events", "scores"]) {
-      await ch().command({ query: `DELETE FROM ${tbl} WHERE project_id IN (${list})` });
-    }
-  }
+  const projectIds = rows.map((r) => safeProjectId(r.id)).filter(Boolean);
+  // Purge through the shared helper rather than a table list written out here.
+  // This list has been wrong twice: `scores` was missing (a deleted customer's
+  // eval rows survived), and then `raw_events` was missing — which is the worst
+  // one to forget, because it holds every ingested payload verbatim. One
+  // definition, in retention.ts, so adding a table can't silently exempt it
+  // from deletion.
+  for (const id of projectIds) await purgeProject(id);
   await pool.query("DELETE FROM organizations WHERE id = $1", [orgId]);
+  // The cascade removed the api_keys rows, but ingest replicas may still be
+  // holding cached lookups for them — a deleted customer must stop being able
+  // to write immediately, not when a cache entry happens to expire.
+  for (const id of projectIds) await publishKeyRevoked(id);
   return { ok: true, projectsPurged: projectIds.length };
 }

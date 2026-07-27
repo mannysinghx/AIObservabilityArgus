@@ -21,14 +21,35 @@ let T: Tenant;
 let ready = false;
 let detectionUp = false;
 
+/**
+ * Is the Argus detection service on DETECTION_URL — not merely *something*?
+ *
+ * "200 from /health" is not enough. Port 8000 is a popular default and this
+ * check happily green-lit an unrelated model server sitting on it, after which
+ * the suite hung on a POST that host had no route for. The /health body
+ * identifies us; anything else is treated as absent.
+ */
 async function detectionAvailable(): Promise<boolean> {
   try {
     const res = await fetch(`${config.detectionUrl}/health`, { signal: AbortSignal.timeout(2000) });
-    return res.ok;
+    if (!res.ok) return false;
+    const body = (await res.json()) as { layers?: Record<string, unknown> };
+    return typeof body.layers === "object" && body.layers !== null && "L4_trace_analysis" in body.layers;
   } catch {
     return false;
   }
 }
+
+/**
+ * Every call to detection is bounded, so a wrong URL fails the test rather than
+ * stalling the run until CI's job timeout.
+ *
+ * A function, not a shared constant: AbortSignal.timeout starts counting the
+ * moment it is created, so one module-level signal would already be spent by the
+ * time the second test used it — the test would fail on a stale deadline rather
+ * than on anything real.
+ */
+const detectTimeout = () => AbortSignal.timeout(10_000);
 
 before(async () => {
   ready = await infraAvailable();
@@ -155,6 +176,7 @@ describe("canary detection, through the real detection service", () => {
 
     const res = await fetch(`${config.detectionUrl}/v1/scan/trace`, {
       method: "POST",
+      signal: detectTimeout(),
       headers: {
         "content-type": "application/json",
         ...(config.detectionApiKey ? { authorization: `Bearer ${config.detectionApiKey}` } : {}),
@@ -183,6 +205,7 @@ describe("canary detection, through the real detection service", () => {
     const refs = await loadCanaries(T.projectId);
     const res = await fetch(`${config.detectionUrl}/v1/scan/trace`, {
       method: "POST",
+      signal: detectTimeout(),
       headers: {
         "content-type": "application/json",
         ...(config.detectionApiKey ? { authorization: `Bearer ${config.detectionApiKey}` } : {}),

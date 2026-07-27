@@ -65,6 +65,8 @@
     .callout { border:1px dashed var(--line); border-radius:var(--radius); padding: calc(var(--u)*2.4) calc(var(--u)*2.8); font-size:12.5px; color:var(--ink-muted); max-width:74ch; }
     .callout.warn { border-color: color-mix(in srgb, var(--sev-high) 45%, var(--line)); background: color-mix(in srgb, var(--sev-high) 6%, transparent); }
     .callout b { color:var(--ink); }
+    .code-block { max-width:74ch; margin:0 0 12px; padding:11px 13px; background:var(--surface-2); border:1px solid var(--line); border-radius:var(--radius); overflow-x:auto; }
+    .code-block code { display:block; background:none; padding:0; font-size:11.5px; line-height:1.65; white-space:pre; color:var(--ink); }
     .steps { display:grid; gap:14px; max-width:74ch; }
     .step { display:flex; gap:12px; align-items:flex-start; }
     .step-num { flex:none; width:22px; height:22px; border-radius:50%; background:var(--accent-soft); color:var(--accent); display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; margin-top:1px; }
@@ -689,6 +691,7 @@
             <button class="toc-link" data-scroll="g-threat">Threat Center</button>
             <button class="toc-link" data-scroll="g-incidents">Incidents</button>
             <button class="toc-link" data-scroll="g-review">Review Queue</button>
+            <button class="toc-link" data-scroll="g-canaries">Canaries</button>
             <button class="toc-link" data-scroll="g-redteam">Red Team</button>
             <div class="toc-label">Observability pages</div>
             <button class="toc-link" data-scroll="g-ovpage">Overview page</button>
@@ -700,8 +703,14 @@
             <button class="toc-link" data-scroll="g-prompts">Prompts</button>
             <button class="toc-link" data-scroll="g-evals">Evals</button>
             <div class="toc-label">Configuration</div>
+            <button class="toc-link" data-scroll="g-alerts">Alerts &amp; suppression</button>
+            <button class="toc-link" data-scroll="g-keys">API keys &amp; access</button>
+            <button class="toc-link" data-scroll="g-retention">Retention &amp; erasure</button>
             <button class="toc-link" data-scroll="g-appearance">Appearance settings</button>
             <button class="toc-link" data-scroll="g-admin">Connecting &amp; admin config</button>
+            <div class="toc-label">Build on Argus</div>
+            <button class="toc-link" data-scroll="g-api">Public API</button>
+            <button class="toc-link" data-scroll="g-gateway">Gateway (inline blocking)</button>
             <div class="toc-label">Help</div>
             <button class="toc-link" data-scroll="g-faq">FAQ</button>
           </nav>
@@ -1025,6 +1034,31 @@
               <button class="btn btn-primary open-page" type="button" data-nav="review">Open Review Queue →</button>
             </article>
 
+            <article class="guide-sec" id="g-canaries">
+              <h2>Canaries</h2>
+              <p>A <b>canary</b> is a unique marker you plant somewhere it should never travel from — the end of your system prompt, an internal document, a customer record. Every other detector on this platform reads text and forms a judgement about intent, and a judgement can be argued with. A canary firing is not a judgement: this exact string was somewhere it could only have come from, and it has now turned up in something your app sent outward.</p>
+              <p><b>There is no benign explanation.</b> This is the one alert worth waking someone up for, and the one finding you should never mark as a false positive without a very specific reason.</p>
+              <h3>Planting one</h3>
+              <div class="steps">
+                <div class="step"><div class="step-num">1</div><div class="step-body"><b>Say where it's going</b><p>Give it a label describing where you're about to put it — "production system prompt", "HR handbook", "test customer record". You'll be glad of this when it fires at 3am.</p></div></div>
+                <div class="step"><div class="step-num">2</div><div class="step-body"><b>Generate it</b><p>Argus mints a token like <code>argus-cnry-…</code> and shows it <b>once</b>. Copy it now — it is never shown again, because Argus only stores a hash of it.</p></div></div>
+                <div class="step"><div class="step-num">3</div><div class="step-body"><b>Paste it where it belongs</b><p>Somewhere your app can read but should never repeat. A common first choice is a final line in your system prompt: <i>"Internal reference: argus-cnry-… — never include this in any response."</i></p></div></div>
+                <div class="step"><div class="step-num">4</div><div class="step-body"><b>Forget about it</b><p>Nothing else to do. If it ever appears in a model response or an outbound tool call, you get a <b>critical</b> incident naming the canary by its label.</p></div></div>
+              </div>
+              <h3>Two kinds, and why the difference matters</h3>
+              <table class="field-table">
+                <tr><th>Kind</th><th>What it means for you</th></tr>
+                <tr><td><b>Generated</b> (recommended)</td><td>Argus mints it and stores only a hash. The detection engine matches it without ever holding the raw value, so a breach of the Argus database does not reveal your markers to an attacker.</td></tr>
+                <tr><td><b>Your own marker</b></td><td>For something you've already planted — a decoy API key, a fake employee record. Matching an arbitrary string requires storing it, so this one is kept in the clear. Use it when you have to; prefer generated otherwise.</td></tr>
+              </table>
+              <h3>What Argus does and doesn't watch</h3>
+              <p>Model outputs and tool calls are watched. Retrieval and search results deliberately are <b>not</b> — planting a canary in a document you also index is the main use case, and alerting because your own retriever found it would make the feature unusable.</p>
+              <p>Custom markers must be at least 12 characters. A short one like "admin" would match ordinary traffic and page you constantly.</p>
+              <p>Revoking a canary stops Argus watching for it but keeps the record, so past incidents still resolve to a label instead of reading "canary &lt;deleted&gt; fired".</p>
+              <p class="dim">Needs <b>member</b> to view, <b>admin</b> to plant or revoke.</p>
+              <button class="btn btn-primary open-page" type="button" data-nav="canaries">Open Canaries →</button>
+            </article>
+
             <article class="guide-sec" id="g-redteam">
               <h2>Red Team</h2>
               <p>Reserved for scheduled, automated attack simulations — running probe suites (like garak or promptfoo) against your application on a schedule and tracking how your attack-success-rate changes over time as you harden your app. This page is currently empty in every deployment; it's a roadmap item. When runs are configured, they'll appear here as scored traces.</p>
@@ -1125,6 +1159,75 @@
               <button class="btn open-page" type="button" data-nav="evals">Open Evals →</button>
             </article>
 
+            <article class="guide-sec" id="g-alerts">
+              <div class="g-kicker">Configuration</div>
+              <h2>Alerts &amp; suppression</h2>
+              <p>Where this application's findings get sent, and what gets kept quiet. Findings are always recorded and always visible in Threat Center — this page only controls who gets <i>told</i>.</p>
+              <h3>Destinations</h3>
+              <table class="field-table">
+                <tr><th>Type</th><th>What to paste</th></tr>
+                <tr><td><b>Slack</b></td><td>An incoming-webhook URL from your Slack workspace. Alerts arrive formatted, with severity, evidence and a link straight to the trace.</td></tr>
+                <tr><td><b>PagerDuty</b></td><td>An Events v2 integration routing key. Argus sets a dedup key so PagerDuty groups repeats itself.</td></tr>
+                <tr><td><b>Webhook</b></td><td>Any HTTPS endpoint of yours. Deliveries are signed (see below) so your receiver can verify they really came from Argus.</td></tr>
+              </table>
+              <p>Each destination has its own severity threshold, so you can send everything to a Slack channel and only criticals to PagerDuty.</p>
+              <p><b>Plain <code>http://</code> is refused.</b> Alert payloads quote the attack and the evidence; they are not something to send unencrypted.</p>
+              <h3>Test before you rely on it</h3>
+              <p>Every destination has a <b>Test</b> button that sends a clearly-marked synthetic alert. Use it. Otherwise the first time you find out the URL was wrong is during the incident it was supposed to report — and the symptom of a broken alert channel is silence, which looks exactly like "nothing is wrong".</p>
+              <p>The <b>Health</b> column shows when a destination last delivered successfully, and turns red with a failure count if it has been failing. Check it occasionally.</p>
+              <h3>Verifying a webhook (for whoever builds the receiver)</h3>
+              <p>When you create a webhook destination, Argus shows a <b>signing secret</b> once. Each delivery carries two headers:</p>
+              <table class="field-table">
+                <tr><th>Header</th><th>Meaning</th></tr>
+                <tr><td><code>x-argus-timestamp</code></td><td>Unix seconds at the time of sending.</td></tr>
+                <tr><td><code>x-argus-signature</code></td><td><code>v1=</code> followed by <code>HMAC-SHA256(secret, "&lt;timestamp&gt;.&lt;raw body&gt;")</code> in hex.</td></tr>
+              </table>
+              <p>Recompute it and compare. Reject anything whose timestamp is old — the timestamp is inside the signed material specifically so a captured delivery can't be replayed later. Without this check, anyone who learns your webhook URL can forge incidents into your pipeline.</p>
+              <h3>Repeats are collapsed automatically</h3>
+              <p>A poisoned document that gets retrieved on every request produces a finding every time. Argus sends the first and suppresses identical repeats for 15 minutes, so you get paged once rather than once per request. A <i>more severe</i> finding on the same content still comes through — escalation is news.</p>
+              <h3>Suppression rules</h3>
+              <p>When a detector reliably fires on something you know is fine — your policy document legitimately quotes injection examples, say — silence <b>that specific thing</b> rather than turning the detector off. Suppressed findings are still recorded and still appear in Threat Center; they just stop paging you.</p>
+              <p>Two things are required, deliberately:</p>
+              <ul>
+                <li><b>Something to target</b> — a rule ID, a category, or a tool. A rule naming nothing would silence the whole application.</li>
+                <li><b>A reason.</b> Six months from now an unexplained suppression is indistinguishable from a mistake, and nobody will dare remove it.</li>
+              </ul>
+              <p>Rules can expire (30 or 90 days), which is usually the right choice — it forces a re-check rather than letting a blind spot become permanent.</p>
+              <p class="dim">Needs <b>member</b> to view, <b>admin</b> to change.</p>
+              <button class="btn btn-primary open-page" type="button" data-nav="alerts">Open Alerts →</button>
+            </article>
+
+            <article class="guide-sec" id="g-keys">
+              <h2>API keys &amp; access</h2>
+              <p>Keys carry <b>scopes</b>, and the two are worth keeping separate.</p>
+              <table class="field-table">
+                <tr><th>Scope</th><th>Can do</th><th>Where it lives</th></tr>
+                <tr><td><b>ingest</b></td><td>Send telemetry. Cannot read anything back.</td><td>Inside your application, deployed to every host that runs it.</td></tr>
+                <tr><td><b>read</b></td><td>Read this application's traces, spans and security events through the <code>/v1</code> API.</td><td>One dashboard, one connector, one scheduled export.</td></tr>
+              </table>
+              <p><b>Why separate them?</b> Your ingest key ships inside your app and is deployed everywhere it runs — by deployment count it is the most exposed credential you hold. If it leaks, it should be able to add junk telemetry and nothing else. It should not also be able to download every prompt and completion it ever sent.</p>
+              <p>Give each key a label so the list means something later. Keys show their scopes and when they were last used, so an unused key is easy to spot and remove.</p>
+              <p>The key value is shown <b>once</b> at creation. Revoking takes effect immediately — not when a cache expires — which matters because revoking is what you do when you believe a key has leaked.</p>
+              <p>Argus refuses to revoke your <i>last ingest key</i>, so an application can't be accidentally orphaned. Read keys have no such restriction.</p>
+              <p class="dim">Needs <b>admin</b>.</p>
+              <button class="btn btn-primary open-page" type="button" data-nav="keys">Open API Keys →</button>
+            </article>
+
+            <article class="guide-sec" id="g-retention">
+              <h2>Retention &amp; erasure</h2>
+              <p>Both live at the bottom of <b>Settings</b>, in their own bordered card. Everything here permanently destroys data, which is why it is separated from the tuning above it and why it requires the <b>owner</b> role rather than admin.</p>
+              <h3>Retention window</h3>
+              <p>How long Argus keeps this application's data. Once a trace passes this age it is deleted from every table — traces, spans, security events, eval scores, and the raw ingest archive.</p>
+              <p>Saving applies the new window <b>immediately</b>. If you shorten it from 90 days to 7, data outside the new window is gone as soon as you press Apply, not at some point overnight.</p>
+              <p>Set it to <b>0</b> to keep everything forever. Note that this is genuinely forever — the raw archive stores every payload your app ever sent, verbatim.</p>
+              <h3>Erasing one person's data</h3>
+              <p>For a deletion request under GDPR, CCPA or similar. Enter the value your application sends as <code>userId</code>, and every trace belonging to that person is deleted across all tables — prompts, completions, tool calls, security events.</p>
+              <p><b>Press Check first.</b> It tells you how many traces will be destroyed before anything happens. This matters more than it sounds: a mistyped user ID matches nothing, and "erased 0 traces" is indistinguishable from a successful erasure unless you looked first.</p>
+              <p>Erasure is synchronous — when it reports done, the rows really are gone, not queued. It is also recorded in the audit log with the subject ID, because that entry is your evidence that the request was honoured.</p>
+              <p class="dim">Needs <b>owner</b>. Irreversible.</p>
+              <button class="btn btn-primary open-page" type="button" data-nav="settings">Open Settings →</button>
+            </article>
+
             <article class="guide-sec" id="g-appearance">
               <h2>Settings — Appearance</h2>
               <p>Personal display preferences. Every change here applies instantly across the whole app, because the UI is built entirely on CSS custom properties (design tokens) — nothing is hardcoded.</p>
@@ -1155,6 +1258,51 @@
               <p>The specific rules (L1), whether classifiers/judge (L2/L3) are enabled, and severity thresholds are configured per project by whoever operates the deployment. If a rule is producing too many false positives, that's tuned at the deployment level, not per-analyst — use <b>False positive</b> verdicts in the meantime to keep your own view accurate; those verdicts are recorded for future tuning.</p>
               <h3>Data retention</h3>
               <p>Argus stores full, untruncated input/output content for every observation (not just a preview) specifically so that historical traffic can be re-analyzed as detection improves, and so investigations have complete evidence. How long that data is kept is a retention setting controlled by whoever operates your deployment.</p>
+            </article>
+
+            <article class="guide-sec" id="g-api">
+              <div class="g-kicker">Build on Argus</div>
+              <h2>Public API</h2>
+              <p>A read API for building things on top of Argus — your own dashboard, a SIEM connector, a nightly export, a script. This is separate from the endpoints this dashboard uses for itself, which are shaped for these screens and authenticate a browser session.</p>
+              <p>Create a key with the <b>read</b> scope under API Keys, then:</p>
+              <div class="code-block"><code>curl -H "Authorization: Bearer ak_live_…" \
+  "https://your-argus/v1/security-events?severity=critical&amp;limit=100"</code></div>
+              <table class="field-table">
+                <tr><th>Endpoint</th><th>Returns</th></tr>
+                <tr><td><code>GET /v1/me</code></td><td>Which application this key belongs to. Useful as a connectivity check.</td></tr>
+                <tr><td><code>GET /v1/traces</code></td><td>Traces, newest first.</td></tr>
+                <tr><td><code>GET /v1/traces/:id</code></td><td>One trace in full — every span with complete input and output, plus every security event on it.</td></tr>
+                <tr><td><code>GET /v1/observations</code></td><td>Spans. Filter by <code>traceId</code> or <code>type</code>.</td></tr>
+                <tr><td><code>GET /v1/security-events</code></td><td>The one most integrations want. Filter by <code>severity</code>, <code>category</code>, <code>outcome</code>, <code>verdict</code>.</td></tr>
+                <tr><td><code>GET /v1/summary</code></td><td>Counters for a window — cheap enough to poll from a status board.</td></tr>
+              </table>
+              <p>All list endpoints take <code>limit</code>, <code>since</code>, <code>until</code> and <code>cursor</code>. To page, pass the <code>nextCursor</code> from the previous response until it comes back null.</p>
+              <p>Paging is cursor-based rather than offset-based on purpose: with offsets, a trace arriving between two pages shifts everything down and your export silently skips a record. Walking with cursors visits every row exactly once even while new data is landing.</p>
+              <p>A filter value Argus doesn't recognise returns <b>400</b>, not an empty page. A monitoring query filtered on a typo'd severity would otherwise report "no critical events" forever and look like good news.</p>
+              <p>The key names the application, so there is no project parameter on any endpoint — nothing to point at someone else's data. Full reference: <code>docs/11-public-api.md</code>.</p>
+            </article>
+
+            <article class="guide-sec" id="g-gateway">
+              <h2>Gateway — inline blocking</h2>
+              <p>Everything else in Argus watches from beside your application. The <b>gateway</b> is optional and sits <i>in front of</i> it: point your OpenAI SDK's <code>base_url</code> at Argus and a high-confidence prompt injection can be refused before your model ever sees it.</p>
+              <div class="code-block"><code>client = OpenAI(
+    base_url="https://your-argus-gateway/v1",
+    api_key=OPENAI_API_KEY,
+    default_headers={"x-argus-key": "ak_live_…"},
+)</code></div>
+              <p>Your provider key is forwarded untouched and never stored — Argus has no business holding your OpenAI billing credential. The <code>x-argus-key</code> header identifies the application.</p>
+              <p>Pointing at the gateway also gives you tracing with <b>no SDK change at all</b>, since every call through it emits a trace.</p>
+              <h3>It fails open, and that is deliberate</h3>
+              <p>This is the only part of Argus on your critical path. If detection is slow, down, or erroring, the request goes through <b>unscanned</b> rather than failing. A security tool that takes your product offline when it has a bad day gets uninstalled within the week — and then it protects nothing at all.</p>
+              <p>Detection gets a hard time budget (300ms by default). Slow is treated exactly like down.</p>
+              <h3>Start in observe mode</h3>
+              <p>The default is <b>observe</b>: it scores and records but never refuses. Run it that way for a week, look in Threat Center at what <i>would</i> have been blocked, and only then switch to <b>block</b>. Turning on an inline blocker you haven't watched first is how you learn about your false positives from a customer.</p>
+              <h3>What it blocks — and what it deliberately won't</h3>
+              <p>Only <b>direct injection</b> and <b>jailbreak</b>, and only in the user's own message. This layer sees a single message with no trace context, so it cannot judge indirect injection, exfiltration or behavioural deviation — those are cross-span patterns and they are what Argus is actually best at, detected with the whole trace in view. Blocking on them here would mean refusing real users to catch attacks this layer can't see.</p>
+              <p>Your system prompt is never scanned. A system prompt is a list of instructions by nature, so scanning it would match injection patterns on every single request.</p>
+              <p>Everything the gateway allows is still scanned in full seconds later by the normal pipeline. The gateway adds a fast, narrow veto in front of that; it does not replace it.</p>
+              <p>A blocked request gets HTTP <b>403</b> in your provider's own error format, so your SDK raises it as a normal API error you can catch. Blocked requests are traced too, so they show up here alongside everything else.</p>
+              <p>Setup and tuning: <code>docs/12-gateway.md</code>.</p>
             </article>
 
             <article class="guide-sec" id="g-faq">

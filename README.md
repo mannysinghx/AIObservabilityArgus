@@ -197,9 +197,17 @@ docs/               design docs 01–08 (vision, architecture, detection, UI spe
 - ✅ Verified demo (poisoned → 2 correct events; benign → 0)
 - ✅ **Full dashboard** (`apps/web`) — Overview, Threat Center, Incidents, Review Queue, Traces + taint-tinted waterfall, Sessions, Analytics, an in-app User Guide, and analyst verdict actions (confirm / false-positive), reading ClickHouse
 - ✅ **Self-service onboarding** (`/onboard.html`) — create a project + API key with no login, copy-paste a working snippet (cURL/Node/Python/OTLP), watch a live "connected" status flip in real time, then get a personalized dashboard link scoped to just that project's data — every dashboard query supports `?project=<id>` isolation
-- 🔜 **Phase 2:** L3 judge, canary tokens end-to-end, pgvector self-hardening corpus, cross-trace RAG-poisoning correlation
-- 🔜 **Dashboard next:** saved views, dashboard builder (per [docs/08](docs/08-ui-design-spec.md)), a clickable project switcher, rate limiting on onboarding
-- 🔜 **Phase 3+:** observability parity (prompts, evals), gateway/blocking mode, scheduled red-teaming
+- ✅ **Canary tokens end-to-end** — plant a marker, get a critical incident if it ever leaves. Generated canaries are stored as a hash only, so the detection engine matches them without ever holding the raw value
+- ✅ **Cross-trace RAG-poisoning correlation** — the same poisoned source recognised across traces (this was silently broken; the content fingerprint was never written)
+- ✅ **Alert routing** — Slack, PagerDuty and HMAC-signed webhooks per application, with dedup and suppression rules
+- ✅ **Data retention & right to erasure** — a retention window that is actually enforced, and a GDPR/CCPA erasure path
+- ✅ **Public read API** (`/v1`) with scoped keys and cursor pagination — build dashboards, SIEM connectors and exports on top of Argus
+- ✅ **Gateway mode** — an OpenAI-compatible inline proxy that can *refuse* a prompt injection, not just report it. Fails open by design
+- ✅ **Operability** — Prometheus metrics, consumer lag, a dead-letter queue, and a worker health endpoint that reports degraded when the pipeline stalls
+- ✅ **Hardening** — rate limiting, CSP, detection-service auth, signup gating, immediate key revocation, tenant-isolation test suite
+- 🔜 **Phase 2 remaining:** L3 judge, pgvector self-hardening corpus
+- 🔜 **Dashboard next:** saved views, dashboard builder (per [docs/08](docs/08-ui-design-spec.md))
+- 🔜 **Phase 3+:** observability parity (prompts, evals), scheduled red-teaming, SSO/SCIM
 
 See [docs/06-roadmap.md](docs/06-roadmap.md) for the full plan.
 
@@ -217,6 +225,9 @@ See [docs/06-roadmap.md](docs/06-roadmap.md) for the full plan.
 | [08 — UI Design Spec](docs/08-ui-design-spec.md) | Design system, theming/white-label, key screens |
 | [09 — Deployment](docs/09-deployment.md) | Self-host on a VM, Railway, or Kubernetes |
 | [10 — Integration Example (Node.js/Express)](docs/10-integration-example-nodejs.md) | Worked example plugging a real app (autogovern.io) into Argus, with a verified poisoned-document attack |
+| [11 — Public API](docs/11-public-api.md) | The `/v1` read API: auth, scopes, pagination, filters, errors |
+| [12 — Gateway](docs/12-gateway.md) | Inline blocking proxy: setup, policy, and where the block threshold comes from |
+| [13 — Feature Reference](docs/13-feature-reference.md) | **Every feature, where to find it in the UI, and what it requires** |
 | [RUNBOOK.md](RUNBOOK.md) | How to run the stack locally and reproduce the demo |
 
 ## Built on

@@ -8,6 +8,7 @@ downstream storage and the taxonomy mapping key on — never renumber them.
 from __future__ import annotations
 
 import re
+from typing import ClassVar
 
 from ..redaction import redact_text
 from .types import FrameworkRef, PromptDocument, Rule, RuleContext, RuleMatch
@@ -15,13 +16,13 @@ from .types import FrameworkRef, PromptDocument, Rule, RuleContext, RuleMatch
 # --- shared patterns ---
 PLACEHOLDER = re.compile(r"(\{\{?\s*\w+\s*\}?\}|\$\{?\w+\}?|<[a-zA-Z_]\w*>|%\(?\w*\)?[sd])")
 INSTRUCTION_VERB = re.compile(
-    r"\b(you must|you should|always|never|follow|obey|execute|do not|ignore|comply)\b", re.I
+    r"\b(you must|you should|always|never|follow|obey|execute|do not|ignore|comply)\b", re.IGNORECASE
 )
 DELIMITER = re.compile(r"(```|\"\"\"|<data>|</data>|<untrusted>|-----|====|###\s)")
 SECRET_HINT = re.compile(
     r"(sk-[A-Za-z0-9]{12,}|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"
     r"|-----BEGIN|\b(password|api[_-]?key|secret|token)\b\s*[:=]\s*\S+)",
-    re.I,
+    re.IGNORECASE,
 )
 
 
@@ -66,8 +67,8 @@ class PatternRule:
         self.confidence = confidence
         self.explanation = explanation
         self.recommendation = recommendation
-        self.triggers = [re.compile(t, re.I) for t in triggers]
-        self.mitigators = [re.compile(m, re.I) for m in (mitigators or [])]
+        self.triggers = [re.compile(t, re.IGNORECASE) for t in triggers]
+        self.mitigators = [re.compile(m, re.IGNORECASE) for m in (mitigators or [])]
         self.kinds = kinds
         self.frameworks = frameworks or []
 
@@ -105,7 +106,7 @@ class UntrustedMixedRule:
     title = "Untrusted data mixed with instructions"
     category = "prompt-separation"
     default_severity = "high"
-    frameworks = [_fr("OWASP-LLM", "LLM01")]
+    frameworks: ClassVar[list[FrameworkRef]] = [_fr("OWASP-LLM", "LLM01")]
 
     def check(self, doc: PromptDocument, ctx: RuleContext) -> list[RuleMatch]:
         lines = [
@@ -134,7 +135,7 @@ class MissingDelimiterRule:
     title = "Missing delimiters around external content"
     category = "context-isolation"
     default_severity = "medium"
-    frameworks = [_fr("OWASP-LLM", "LLM01")]
+    frameworks: ClassVar[list[FrameworkRef]] = [_fr("OWASP-LLM", "LLM01")]
 
     def check(self, doc: PromptDocument, ctx: RuleContext) -> list[RuleMatch]:
         ph = _lines_matching(doc, PLACEHOLDER)
@@ -159,7 +160,7 @@ class SecretInPromptRule:
     title = "Secret or sensitive value in prompt"
     category = "sensitive-data"
     default_severity = "high"
-    frameworks = [_fr("OWASP-LLM", "LLM06")]
+    frameworks: ClassVar[list[FrameworkRef]] = [_fr("OWASP-LLM", "LLM06")]
 
     def check(self, doc: PromptDocument, ctx: RuleContext) -> list[RuleMatch]:
         lines = _lines_matching(doc, SECRET_HINT)
@@ -183,7 +184,7 @@ class VariableUnescapedRule:
     title = "Prompt variable inserted without escaping"
     category = "injection"
     default_severity = "medium"
-    frameworks = [_fr("OWASP-LLM", "LLM01")]
+    frameworks: ClassVar[list[FrameworkRef]] = [_fr("OWASP-LLM", "LLM01")]
     _adjacent = re.compile(r"[`\"'<>{](\{\{?\s*\w+\s*\}?\}|\$\{?\w+\}?)|(\{\{?\s*\w+\s*\}?\}|\$\{?\w+\}?)[`\"'<>}]")
 
     def check(self, doc: PromptDocument, ctx: RuleContext) -> list[RuleMatch]:
@@ -209,9 +210,9 @@ class WriteWithoutApprovalRule:
     title = "Missing human confirmation for high-impact action"
     category = "human-approval"
     default_severity = "high"
-    frameworks = [_fr("OWASP-LLM", "LLM08")]
-    _write = re.compile(r"\b(delete|remove|send|transfer|purchase|pay|modify|update|drop|wire)\b", re.I)
-    _approval = re.compile(r"\b(confirm|approval|human review|authorize|verify with)\b", re.I)
+    frameworks: ClassVar[list[FrameworkRef]] = [_fr("OWASP-LLM", "LLM08")]
+    _write = re.compile(r"\b(delete|remove|send|transfer|purchase|pay|modify|update|drop|wire)\b", re.IGNORECASE)
+    _approval = re.compile(r"\b(confirm|approval|human review|authorize|verify with)\b", re.IGNORECASE)
 
     def check(self, doc: PromptDocument, ctx: RuleContext) -> list[RuleMatch]:
         content = doc.content
@@ -239,7 +240,7 @@ class UserControlledToolRule:
     title = "User-controlled tool name or description"
     category = "tool-security"
     default_severity = "high"
-    frameworks = [_fr("OWASP-LLM", "LLM08")]
+    frameworks: ClassVar[list[FrameworkRef]] = [_fr("OWASP-LLM", "LLM08")]
 
     def check(self, doc: PromptDocument, ctx: RuleContext) -> list[RuleMatch]:
         placeholder_in_tool = doc.kind == "tool_description" and bool(PLACEHOLDER.search(doc.content))
@@ -339,8 +340,10 @@ _PATTERN_RULES = [
         explanation="The prompt tells the model to follow/obey retrieved or document content.",
         recommendation="Treat retrieved content strictly as data; never follow instructions contained in it.",
         triggers=[
-            r"\b(follow|obey|execute|comply with|do what)\b.{0,30}"
-            r"\b(retrieved|document|context|search results|the file)\b"
+            (
+                r"\b(follow|obey|execute|comply with|do what)\b.{0,30}"
+                r"\b(retrieved|document|context|search results|the file)\b"
+            )
         ],
         frameworks=[_fr("OWASP-LLM", "LLM01")],
     ),
@@ -368,8 +371,10 @@ _PATTERN_RULES = [
         explanation="User input can reassign the model's role or override prior instructions.",
         recommendation="Prevent user input from setting system-level directives or reassigning roles.",
         triggers=[
-            r"\b(you are now|act as|ignore (all )?previous|new instructions|"
-            r"forget (the|your) instructions|system:)\b"
+            (
+                r"\b(you are now|act as|ignore (all )?previous|new instructions|"
+                r"forget (the|your) instructions|system:)\b"
+            )
         ],
         frameworks=[_fr("OWASP-LLM", "LLM01")],
     ),

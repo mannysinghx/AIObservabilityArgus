@@ -104,11 +104,27 @@ function isoTest(name: string, fn: () => Promise<void>): void {
   });
 }
 
-/** Kept in sync with the assessment guard() list in app.ts. */
-const SCOPED_READS = ["assessments", "assessment-findings", "assessment-graph"];
+/**
+ * Kept in sync with the assessment guard() list in app.ts.
+ *
+ * `proof` is a string that MUST appear in the tenant's own response. Without it
+ * the "B's marker is absent" assertion below passes vacuously on an empty body,
+ * which would make this suite a green check mark over an untested boundary.
+ *
+ * It differs per endpoint on purpose: the /api/assessments list projection
+ * returns no free-text columns at all (context and documents are detail-only,
+ * so a table view doesn't ship a tenant's prompt metadata over the wire), so the
+ * marker cannot appear there by design. The assessment's id is the equivalent
+ * proof that the row is visible.
+ */
+const SCOPED_READS: { name: string; proof: (t: Tenant, s: Seeded) => string }[] = [
+  { name: "assessments", proof: (_t, s) => s.assessmentId },
+  { name: "assessment-findings", proof: (t) => t.secret },
+  { name: "assessment-graph", proof: (t) => t.secret },
+];
 
 describe("assessment cross-tenant reads", () => {
-  for (const name of SCOPED_READS) {
+  for (const { name, proof } of SCOPED_READS) {
     isoTest(`/api/${name} refuses another tenant's project`, async () => {
       const res = await app.inject({
         method: "GET",
@@ -125,10 +141,19 @@ describe("assessment cross-tenant reads", () => {
         headers: { cookie: A.cookie },
       });
       assert.equal(res.statusCode, 200, `own project should be readable: ${res.body.slice(0, 300)}`);
-      assert.ok(res.body.includes(A.secret), `own marker missing — fixture not visible:\n${res.body.slice(0, 300)}`);
+      assert.ok(
+        res.body.includes(proof(A, seededA)),
+        `own data not visible — the leak assertion below would be vacuous:\n${res.body.slice(0, 300)}`,
+      );
       assert.ok(
         !res.body.includes(B.secret),
         `response for /api/${name} contained tenant B's marker:\n${res.body.slice(0, 600)}`,
+      );
+      // B's assessment id must not appear either — the list is scoped by
+      // project, and ids are the one field this projection does return.
+      assert.ok(
+        !res.body.includes(seededB.assessmentId),
+        `response for /api/${name} contained tenant B's assessment id:\n${res.body.slice(0, 600)}`,
       );
     });
   }

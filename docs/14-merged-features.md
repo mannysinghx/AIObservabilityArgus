@@ -7,9 +7,11 @@ not come. If you are looking for a capability and can't find it in the UI, look
 here first — a few merged pieces (policies, controls, reports) are still
 API-only or not yet ported.
 
-**Status:** Phases 1–4 shipped. The two halves of the platform now feed each
-other (see *Synthesis* below). Remaining: policy-driven gateway blocking, then
-decommissioning the standalone InjectGuard deployment.
+**Status: the merge is complete.** All five phases shipped, the Browser Guard
+extension is ported, and the standalone InjectGuard deployment has been shut
+down (its source is kept — see *Phase 5*). Two optional pieces were deliberately
+not ported and are listed, with reasons, under *What deliberately did NOT
+merge*.
 
 | Phase | What | Commit | State |
 |---|---|---|---|
@@ -19,7 +21,7 @@ decommissioning the standalone InjectGuard deployment.
 | 4 | Synthesis: trace-derived graphs + runtime→risk feedback | see `git log` | ✅ shipped |
 | 4b | Governance policies + per-project gateway blocking | `c0fb690` | ✅ shipped |
 | 4c | Controls + report generation | see `git log` | ✅ shipped |
-| 5 | Decommission the standalone InjectGuard deployment | — | planned |
+| 5 | Browser Guard extension port + decommission `injectguard-prod` | `3147dfd` | ✅ shipped |
 
 ---
 
@@ -394,41 +396,31 @@ Two things worth knowing:
 
 ---
 
-## Phase 5 — retiring the standalone InjectGuard deployment
+## Phase 5 — retiring the standalone InjectGuard deployment ✅ done
 
-**Not started. Requires an explicit decision, because it shuts down live
-services.** As of this writing `injectguard-prod` (Railway) is up and answering:
-Postgres, Redis, `injectguard-api`, `injectguard-worker`, `injectguard-web`.
+**The `injectguard-prod` Railway project is shut down.** The owner confirmed it
+held no data worth keeping (it only ever had the seeded demo organization), and
+all five services — `injectguard-web`, `injectguard-api`, `injectguard-worker`,
+Redis and Postgres — were deleted on 2026-08-01. Both public URLs now return
+404. Argus was unaffected throughout.
 
-Everything the merged product needs from InjectGuard is already ported and
-running in Argus. What remains is disposal, and disposal has three questions
-that only the owner can answer.
+**The source code was deliberately kept.** It remains in the ThreatClaw repo at
+`injectguard/`, untouched. Shutting down the deployment is not the same as
+discarding the history, and the two remaining unported pieces (the tamper-
+evident audit chain, and policy scope inheritance/exceptions — see the table
+above) still live there as the reference implementation.
 
-**1. Is there anything in it worth keeping?** The deployment was seeded with a
-demo organization. If real assessments have been run against it since, those
-rows exist only there — Argus has no import path for them, and building one is
-only worth doing if the answer is yes. Check before anything is switched off:
+Order it was done in, which is the order to reuse if another deployment ever
+needs retiring: confirm there is nothing to migrate → make sure nothing depends
+on it any more (here, the Browser Guard extension had already been repointed at
+Argus) → delete the user-facing services first so traffic stops before anything
+stateful moves → datastores last.
 
-```bash
-railway link -p injectguard-prod && railway variables --service Postgres
-# then count rows in assessments / findings / applications
-```
-
-**2. ~~What happens to the Browser Guard extension?~~ Done.** It now lives at
-[`apps/extension/`](../apps/extension/) and reports to Argus directly — see
-*Browser Guard extension* above. Existing installs need to update and re-enter
-their settings: the endpoint moved and the credential type changed from a
-90-day ingest token to an `ak_live_` API key, so the old configuration cannot
-be carried across.
-
-**3. Sequence, once those are answered.** Take a Postgres dump first and keep it
-somewhere durable — a dump costs nothing and un-deleting a Railway volume is not
-a thing. Then: repoint or retire the extension → confirm no traffic is reaching
-`injectguard-api` → remove the public domains (reversible, and a good pause
-point) → delete the services → keep or delete the volume last, deliberately.
-
-Until then the two systems coexist harmlessly: the merge added to Argus and
-changed nothing in `injectguard-prod`.
+**One consequence to be aware of:** any Browser Guard install still running the
+old InjectGuard build now posts to a dead endpoint. It fails safe — scanning is
+local and unaffected, and a failed report is dropped rather than retried — but
+those verdicts are going nowhere until the install is updated and reconfigured
+with an Argus URL and `ak_live_` key.
 
 ---
 

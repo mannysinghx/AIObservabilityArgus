@@ -133,6 +133,34 @@ Two things are mandatory:
 Rules can expire (30/90 days), which is usually right: it forces a re-check rather
 than letting a blind spot become permanent.
 
+### Static assessment (API only — Phase 1 of the InjectGuard merge)
+
+No UI yet; the detection service exposes it at `/v1/assess/*` behind the same
+`DETECTION_API_KEY` as the scan endpoints. Where L1–L4 judge live traffic, this
+judges the application *as built* — before an attacker supplies any input:
+
+- **`POST /v1/assess/prompt`** — 20 deterministic rules (`IG-PROMPT-001..020`)
+  over prompt templates: instruction/data mixing, secrets in prompts, model-
+  controlled authorization, direct execution of output, and so on. Every finding
+  carries a transparent 5-factor risk score (versioned, recomputable from its
+  stored factors), ranked mitigations from a curated catalog, OWASP LLM /
+  MITRE ATLAS / NIST AI RMF references, and a mapping into the runtime
+  category taxonomy so assessment and runtime findings can share storage and
+  routing later.
+- **`POST /v1/assess/graph`** — trust-boundary analysis over an architecture
+  graph (nodes + edges): untrusted→trusted instruction flow, model output into
+  interpreters, write-capable tools without human approval, cross-tenant data
+  paths, retrieval without provenance.
+- **`POST /v1/assess/policy`** — a fail-closed policy-as-code evaluator
+  (dotted-path conditions, implicit AND; unknown fields and unknown operators
+  never match).
+
+Everything under `argus_detection/assessment/` is pure — no DB, no network, no
+model calls — ported from InjectGuard with its golden tests, so the engines can
+later run in the worker or gateway unchanged. `/health` reports
+`assessment.prompt_rules` and `assessment.scoring_version` for deploy
+verification.
+
 ---
 
 ## Data governance

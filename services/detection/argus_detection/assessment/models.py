@@ -1,0 +1,151 @@
+"""Pydantic request/response shapes for the /v1/assess endpoints.
+
+Kept separate from argus_detection.models (the runtime scan shapes) because the
+two surfaces version independently: a runtime scan is called per-span by the
+worker; an assessment is called per-application by the web tier.
+"""
+
+from __future__ import annotations
+
+from pydantic import BaseModel, Field
+
+
+class PromptDoc(BaseModel):
+    """One prompt under assessment. `name` is echoed back for correlation."""
+
+    kind: str = "system"  # system|developer|tool_description|memory_instruction|...
+    content: str
+    name: str = ""
+
+
+class AssessContext(BaseModel):
+    """Deterministic application facts. Everything defaults to the safe-side
+    assumption InjectGuard used: unknown facts neither suppress rules nor
+    grant compensating-control credit."""
+
+    has_write_capable_tools: bool = False
+    human_approval_enabled: bool = False
+    has_retrieval: bool = False
+    is_public: bool = False
+    tool_names_user_controlled: bool = False
+    has_compensating_controls: bool = False
+    has_sensitive_data: bool = False
+    business_criticality: str = "medium"  # critical|high|medium|low
+
+
+class RiskBreakdown(BaseModel):
+    """The full transparent risk computation — reproducible from `factors` alone."""
+
+    factors: dict[str, int]
+    weights: dict[str, float]
+    contributions: dict[str, float]
+    base_score: int
+    confidence_adjustment: int
+    final_score: int
+    severity: str
+    rationale: str
+    scoring_version: str
+
+
+class MitigationRec(BaseModel):
+    key: str
+    title: str
+    category: str
+    priority: str
+    difficulty: str
+    expected_risk_reduction: int
+    score: float
+    rationale: str
+    implementation_guidance: str
+    validation_procedure: str
+
+
+class AssessFinding(BaseModel):
+    document_index: int
+    document_name: str = ""
+    rule_id: str
+    title: str
+    category: str
+    severity: str
+    confidence: str
+    explanation: str
+    affected_lines: list[int]
+    evidence: str
+    recommendation: str
+    frameworks: list[dict[str, str]] = Field(default_factory=list)
+    # Bridge into the runtime taxonomy (None = hygiene finding, no attack class).
+    argus_category: str | None = None
+    argus_severity: str
+    risk: RiskBreakdown
+    mitigations: list[MitigationRec] = Field(default_factory=list)
+
+
+class AssessPromptRequest(BaseModel):
+    project_id: str = "default"
+    documents: list[PromptDoc]
+    context: AssessContext = Field(default_factory=AssessContext)
+    # How many ranked mitigations to attach per finding (0 disables).
+    top_mitigations: int = Field(default=3, ge=0, le=10)
+
+
+class AssessPromptResponse(BaseModel):
+    project_id: str
+    finding_count: int
+    max_severity: str | None = None      # native assessment label
+    overall_risk: int = 0                # max finding final_score, 0 when clean
+    scoring_version: str
+    findings: list[AssessFinding] = Field(default_factory=list)
+
+
+class GraphNodeIn(BaseModel):
+    id: str
+    label: str = ""
+    node_type: str = "other"
+    trust_level: str = "trusted"
+    can_write: bool = False
+    requires_approval: bool = False
+    attributes: dict = Field(default_factory=dict)
+
+
+class GraphEdgeIn(BaseModel):
+    source: str | None = None
+    target: str | None = None
+    edge_type: str = ""
+    tenant_boundary: bool = False
+    name: str = ""
+
+
+class AssessGraphRequest(BaseModel):
+    project_id: str = "default"
+    nodes: list[GraphNodeIn]
+    edges: list[GraphEdgeIn] = Field(default_factory=list)
+
+
+class GraphInsightOut(BaseModel):
+    rule: str
+    severity: str
+    message: str
+    component_ids: list[str] = Field(default_factory=list)
+    argus_category: str | None = None
+    argus_severity: str
+
+
+class AssessGraphResponse(BaseModel):
+    project_id: str
+    insight_count: int
+    max_severity: str | None = None
+    insights: list[GraphInsightOut] = Field(default_factory=list)
+
+
+class AssessPolicyRequest(BaseModel):
+    project_id: str = "default"
+    policy: dict
+    context: dict
+
+
+class AssessPolicyResponse(BaseModel):
+    project_id: str
+    matched: bool
+    action: str
+    severity: str
+    message: str | None = None

@@ -345,13 +345,11 @@ was accepted, authorized, and then produced no findings.
 
 **Not merged yet — planned:**
 
-| Feature | Where it still lives | Plan |
+| Feature | Where it still lives | Notes |
 |---|---|---|
-| Controls + evidence, coverage view | `injectguard/apps/api/injectguard_api/services/controls.py` | Phase 2b/3 |
-| Policy *storage*, scope inheritance, exceptions | `services/policies.py` | Phase 2b/3 (the evaluator already merged) |
-| Reports — executive/technical/governance, PDF/MD/CSV | `services/reports.py`, `reports/pdf.py` | Phase 3 |
-| Hash-chained tamper-evident audit + verify endpoint | `services/audit.py` | after fixing its ordering/concurrency fork |
-| Browser Guard extension + telemetry ingest | `injectguard/apps/extension/` | Phase 5 — kept as a free-tool distribution channel, repointed at Argus ingest |
+| Hash-chained tamper-evident audit + `verify` endpoint | `injectguard/apps/api/injectguard_api/services/audit.py` | Argus has an audit log and writes to it throughout; what is missing is the *tamper-evidence* — a per-tenant hash chain you can verify. Worth having for a compliance story, but InjectGuard's version orders by `created_at` and does an unsynchronized read-prev-then-append, so concurrent writes in one org can fork the chain. Port it after fixing that (monotonic sequence column + per-org lock), not before. |
+| Policy scope inheritance + exceptions | `services/policies.py` | The evaluator and flat per-project storage are merged. InjectGuard additionally resolved `organization < workspace < application` precedence and let a matched policy be suppressed by a recorded exception. Neither is ported: Argus has no workspace tier, and nobody has yet needed to grant an exception. Add when a real policy set outgrows on/off. |
+| Browser Guard extension + telemetry ingest | `injectguard/apps/extension/` | See *Phase 5* below — it needs a decision, not just a port. |
 
 The standalone InjectGuard deployment (Railway project `injectguard-prod`) keeps
 running untouched until Phase 5. Nothing in this merge has changed it.

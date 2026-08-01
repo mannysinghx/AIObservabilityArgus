@@ -133,11 +133,18 @@ Two things are mandatory:
 Rules can expire (30/90 days), which is usually right: it forces a re-check rather
 than letting a blind spot become permanent.
 
-### Static assessment (API only — Phase 1 of the InjectGuard merge)
+### Static assessment
 
-No UI yet; the detection service exposes it at `/v1/assess/*` behind the same
-`DETECTION_API_KEY` as the scan endpoints. Where L1–L4 judge live traffic, this
-judges the application *as built* — before an attacker supplies any input:
+**Assessments** (Security group) · view: any role · run/edit: member+
+
+Where L1–L4 judge live traffic, this judges the application *as built* — before
+an attacker supplies any input. Three tabs, meant to be used in order:
+**Architecture** (describe the app once; pre-fills the rest), **Runs** (paste a
+prompt, run it, browse past runs), **Findings** (everything from every run, with
+open/resolved/accepted triage).
+
+The same capabilities are available to scripts via `/api/assess/*`, and the pure
+engines sit behind `/v1/assess/*` on the detection service:
 
 - **`POST /v1/assess/prompt`** — 20 deterministic rules (`IG-PROMPT-001..020`)
   over prompt templates: instruction/data mixing, secrets in prompts, model-
@@ -176,6 +183,21 @@ migration `013_assessments.sql` explains the reduction from InjectGuard's
 schema). The web service now needs `DETECTION_URL` (+ `DETECTION_API_KEY`)
 set, same as the worker. Isolation coverage:
 `tests/integration/assessments.test.ts`.
+
+**Phase 3 — the dashboard views.** The Assessments page renders all of the
+above: a run form whose application-facts checkboxes are pre-filled from the
+saved architecture graph, run history, a per-run breakdown (every finding with
+its transparent risk rationale, factor scores, and ranked mitigations behind
+`<details>`), a cross-run Findings table with inline status triage, and a
+component/connection editor with a "Save & analyze" action. Everything the page
+renders — evidence excerpts especially — is engine output derived from customer
+prompts, so it is escaped on the way in; the CSP is the backstop, not the
+control. Severity pills render from each finding's `argus_severity` (the runtime
+spelling) rather than the native label, because the engine's lowest band is
+`informational` and no such pill style exists.
+
+Not yet ported from InjectGuard: policy *storage* (the evaluator is merged and
+callable), controls, and report generation.
 
 ---
 

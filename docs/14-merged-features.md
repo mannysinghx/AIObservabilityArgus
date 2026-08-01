@@ -4,15 +4,17 @@
 AI security *assessment and governance* platform. This is the map of what came
 across, where each piece lives now, how to reach it, and what deliberately did
 not come. If you are looking for a capability and can't find it in the UI, look
-here first: several merged features are API-only until the Phase 3 frontend port.
+here first — a few merged pieces (policies, controls, reports) are still
+API-only or not yet ported.
 
-**Status:** Phases 1 and 2 shipped. Phase 3 (dashboard UI) is next.
+**Status:** Phases 1–3 shipped. The assessment loop is usable in the dashboard
+under **Assessments**; Phase 4 (synthesis) is next.
 
 | Phase | What | Commit | State |
 |---|---|---|---|
 | 1 | Assessment engines + `/v1/assess/*` | `371ce4c` | ✅ shipped |
 | 2 | Tenanted storage + `/api/assess*` | `731b0ab` | ✅ shipped |
-| 3 | Dashboard views (Assessments, Findings, Reports, Controls) | — | planned |
+| 3 | Dashboard UI — Assessments (Runs / Findings / Architecture) | see `git log` | ✅ shipped |
 | 4 | Synthesis: trace-derived graphs, runtime→risk feedback, policy-driven blocking | — | planned |
 | 5 | Decommission the standalone InjectGuard deployment | — | planned |
 
@@ -52,7 +54,7 @@ model output, missing delimiters, tool-definition injection, and more.
 | **Rule IDs** | `IG-PROMPT-001` … `IG-PROMPT-020` — **stable identifiers**, never renumber them; storage and the taxonomy map key on them |
 | **Engine API** | `POST /v1/assess/prompt` (detection service) |
 | **Dashboard API** | `POST /api/assess/prompt` (member+) |
-| **UI** | none yet → Phase 3 |
+| **UI** | Assessments → Runs tab |
 | **Tests** | [`services/detection/tests/test_assessment_scanner.py`](../services/detection/tests/test_assessment_scanner.py) |
 
 Rules are not regex-only: six are structural/context-aware classes that consult
@@ -90,7 +92,7 @@ provenance.
 | **Engine API** | `POST /v1/assess/graph` |
 | **Dashboard API** | `POST /api/assessment/graph` (save), `POST /api/assessment/graph/analyze` (run), `GET /api/assessment-graph` (read) |
 | **Storage** | one graph per project, replace-on-write (`assessment_graphs`) |
-| **UI** | none yet → Phase 3 |
+| **UI** | Assessments → Architecture tab (editor + "Save & analyze") |
 | **Tests** | [`test_assessment_graph.py`](../services/detection/tests/test_assessment_graph.py) |
 
 InjectGuard read this graph from ORM rows; here it is plain dataclasses, which

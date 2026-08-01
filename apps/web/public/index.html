@@ -92,6 +92,7 @@
       <button class="nav-item" type="button" data-nav="threat"><span class="nav-ico">◉</span>Threat Center<span class="nav-badge" id="critBadge" style="display:none">0</span></button>
       <button class="nav-item" type="button" data-nav="incidents"><span class="nav-ico">⚑</span>Incidents</button>
       <button class="nav-item" type="button" data-nav="review"><span class="nav-ico">☰</span>Review Queue<span class="nav-badge" id="reviewBadge" style="display:none;background:var(--sev-high)">0</span></button>
+      <button class="nav-item" type="button" data-nav="assess"><span class="nav-ico">⚗</span>Assessments</button>
       <button class="nav-item" type="button" data-nav="redteam"><span class="nav-ico">⚔</span>Red Team</button>
     </div>
     <div class="nav-group app-nav">
@@ -554,6 +555,25 @@
         <div class="card"><div class="tablewrap"><table class="feed" id="reviewTable"><tbody></tbody></table></div></div>
       </section>
 
+      <!-- ASSESSMENTS (static analysis: prompts + architecture) -->
+      <section class="view" id="view-assess">
+        <div class="page-head"><h1 class="page-title">Assessments</h1><span class="page-sub" id="assessSub">static analysis — how this app is built, not what it's doing</span></div>
+        <div class="set-intro card" style="padding:calc(var(--u)*2.6) calc(var(--u)*3.2);font-size:12.5px;color:var(--ink-muted)">
+          Everything else on this platform watches your app <b>while it runs</b>. This asks the other question: is it
+          <b>built</b> safely? Assessments read your prompt templates and your architecture — before an attacker sends
+          anything — and tell you which weaknesses an attack would exploit. Findings are deterministic: the same prompt
+          always produces the same result, so what you fix stays fixed.
+          <div style="margin-top:10px"><b>Your prompt text is never stored.</b> Argus keeps the document name, the facts
+          you declare below, and a short evidence excerpt per finding with secrets already redacted out of it.</div>
+        </div>
+        <div class="dtabs" id="assessTabs" style="display:flex;gap:2px;border-bottom:1px solid var(--line);margin:calc(var(--u)*3) 0 calc(var(--u)*3)">
+          <button class="dtab active" type="button" data-atab="runs">Runs</button>
+          <button class="dtab" type="button" data-atab="findings">Findings</button>
+          <button class="dtab" type="button" data-atab="arch">Architecture</button>
+        </div>
+        <div id="assessPane"></div>
+      </section>
+
       <!-- RED TEAM -->
       <section class="view" id="view-redteam">
         <div class="page-head"><h1 class="page-title">Red Team</h1><span class="page-sub">scheduled attack simulation &amp; regression</span></div>
@@ -639,6 +659,9 @@
             <div class="es-row"><span class="es-n">3</span><span>Your app fetches the labelled version at runtime — changing a prompt no longer needs a redeploy.</span></div>
           </div>
           <p><b>Not built yet.</b> The API and this view are a planned feature; nothing you do today will populate it.</p>
+          <p>If what you actually want is to <b>check a prompt for security weaknesses</b> — instruction/data mixing, secrets, model-controlled authorization — that exists today under
+          <button class="btn open-page" type="button" data-nav="assess" style="padding:5px 11px;font-size:12px">Assessments</button>.
+          It analyses a prompt without storing its text, which is why the two features are separate: version control has to keep your prompts, and assessment deliberately doesn't.</p>
         </div></div>
       </section>
 
@@ -1065,7 +1088,13 @@
               <h2>Static assessment</h2>
               <p class="lede">Everything else on this platform watches your application <b>while it runs</b>. Static assessment asks a different question: is your application <b>built</b> safely in the first place? It reads your prompt templates and your architecture — before an attacker sends anything — and tells you which weaknesses an attack would exploit.</p>
               <p>This is the half of the product that came from <b>InjectGuard</b>, a separate AI security assessment tool that was merged into Argus. The two halves answer questions you need both of: <i>"am I being attacked right now?"</i> (traces, Threat Center, canaries) and <i>"could I be attacked, and can I prove I fixed it?"</i> (this).</p>
-              <p><b>There is no page for this yet.</b> The engine and the API are live and storing results; the dashboard views land in the next release. Until then you drive it through the API below — everything you record now will appear in those views when they ship.</p>
+              <p>The <b>Assessments</b> page has three tabs, and they're meant to be used in this order:</p>
+              <table class="field-table">
+                <tr><th>Tab</th><th>What it's for</th></tr>
+                <tr><td><b>Architecture</b></td><td>Describe your app once — its components and how data moves between them. Do this first: it makes every later finding architecture-aware instead of generic, and pre-fills the facts on the Runs tab.</td></tr>
+                <tr><td><b>Runs</b></td><td>Paste a prompt template, confirm the facts about your app, and run an assessment. Results appear in about a second; each past run is listed underneath, and clicking one opens its findings in full.</td></tr>
+                <tr><td><b>Findings</b></td><td>Every finding from every run in one list, with a status you can set as you work through them — the same triage flow as the Review Queue for runtime events.</td></tr>
+              </table>
 
               <h3>What it looks for</h3>
               <p>Twenty deterministic rules over your prompts, and seven over your architecture. Deterministic matters here: the same prompt always produces the same findings, so a result you fixed stays fixed, and nothing depends on a model's mood.</p>
@@ -1088,13 +1117,16 @@
                 <tr><td><b>Framework references</b></td><td>OWASP LLM Top 10, MITRE ATLAS, NIST AI RMF. This is what makes a finding usable in an audit conversation rather than only an engineering one.</td></tr>
               </table>
 
-              <h3>Running one</h3>
+              <h3>The facts you declare matter</h3>
+              <p>The checkboxes on the Runs tab are not decoration — they change real outcomes. Declaring write-capable tools without an approval step fires a rule that prompt text alone could never reveal, and a public-facing app scores higher on exposure. Fill them in honestly: an assessment run against optimistic facts is a reassuring number about an application that doesn't exist. Fill in the Architecture tab and Argus derives most of them for you.</p>
+
+              <h3>Running one from a script</h3>
+              <p>Everything the page does is available as an API, so you can run an assessment in CI and fail a build on a critical finding.</p>
               <div class="code-block"><code>curl -X POST https://your-argus/api/assess/prompt \
   -H "content-type: application/json" -b "argus_session=…" \
   -d '{"project":"&lt;project-id&gt;",
        "documents":[{"kind":"system","name":"main","content":"…your prompt…"}],
        "context":{"is_public":true,"has_write_capable_tools":true}}'</code></div>
-              <p>The <code>context</code> object is how the assessment learns about your app. It changes real outcomes: declaring write-capable tools without approval fires a rule that prompt text alone would never reveal, and a public app scores higher on exposure. Fill it in honestly — an assessment against optimistic facts is a reassuring number about an app that doesn't exist.</p>
               <table class="field-table">
                 <tr><th>Endpoint</th><th>What it does</th></tr>
                 <tr><td><code>POST /api/assess/prompt</code></td><td>Run an assessment over one or more prompt documents. Stores the run and its findings.</td></tr>
@@ -1109,7 +1141,8 @@
               <h3>What Argus stores, and what it refuses to</h3>
               <p><b>Your prompt text is never stored.</b> Argus keeps the document's name and kind, the context facts you supplied, and a short evidence excerpt per finding with secrets already redacted out of it. Prompts are your intellectual property and they routinely contain the exact credentials the scanner is flagging — keeping them would make this platform the disclosure it's meant to prevent.</p>
               <p>Findings keep their full risk breakdown and mitigation ranking as recorded, so a score you saw six months ago still explains itself even after the scoring model changes. Each row carries the version it was computed with.</p>
-              <p class="dim">Needs <b>member</b> to view and to run. If you get <i>"assessment engine unavailable"</i>, the detection service is unreachable — that's an operational fault, not a problem with your prompt.</p>
+              <p class="dim">Viewing needs any role; running an assessment and editing the architecture need <b>member</b>. If you see <i>"assessment engine unavailable"</i>, the detection service is unreachable — an operational fault, not a problem with your prompt.</p>
+              <button class="btn btn-primary open-page" type="button" data-nav="assess">Open Assessments →</button>
             </article>
 
             <article class="guide-sec" id="g-redteam">
@@ -1202,7 +1235,8 @@
 
             <article class="guide-sec" id="g-prompts">
               <h2>Prompts</h2>
-              <p>Reserved for versioned prompt management — storing your system/user prompt templates with labels (e.g. <code>production</code>, <code>staging</code>) and diffing changes over time. No prompts have been registered on this deployment yet; this is a roadmap feature (Phase 3). Once your app registers prompts through the prompts API, they'll appear here.</p>
+              <p>Reserved for versioned prompt management — storing your system/user prompt templates with labels (e.g. <code>production</code>, <code>staging</code>) and diffing changes over time. No prompts have been registered on this deployment yet; it remains a roadmap item.</p>
+              <p><b>This is not where you check a prompt for security problems</b> — that's <button class="toc-link" style="display:inline;padding:0;color:var(--accent);text-decoration:underline" data-scroll="g-assess">Static assessment</button>, which works today. The two are deliberately separate: version control has to <i>store</i> your prompts, and assessment deliberately never does.</p>
               <button class="btn open-page" type="button" data-nav="prompts">Open Prompts →</button>
             </article>
 

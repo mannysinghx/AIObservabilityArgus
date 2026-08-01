@@ -174,7 +174,7 @@ function breakdown(sel, items, isSev) {
 }
 
 // ---------- routing ----------
-const VIEWS = ["apps", "overview", "threat", "incidents", "review", "redteam", "traces", "trace", "sessions", "analytics", "prompts", "evals", "settings", "keys", "canaries", "alerts", "team", "audit", "admin", "customers", "adminusers", "auditall", "appearance", "guide"];
+const VIEWS = ["apps", "overview", "threat", "incidents", "review", "assess", "redteam", "traces", "trace", "sessions", "analytics", "prompts", "evals", "settings", "keys", "canaries", "alerts", "team", "audit", "admin", "customers", "adminusers", "auditall", "appearance", "guide"];
 function show(view) {
   VIEWS.forEach((v) => $(`#view-${v}`).classList.toggle("on", v === view));
   document.querySelectorAll(".nav-item[data-nav]").forEach((b) => b.classList.toggle("active", b.dataset.nav === view));
@@ -701,13 +701,13 @@ function applyFilter(q) {
 
 // ---------- loader dispatch ----------
 // Views that only make sense inside a selected application.
-const SCOPED_VIEWS = new Set(["overview", "threat", "incidents", "review", "redteam", "traces", "sessions", "analytics", "prompts", "evals", "settings", "keys", "team", "audit"]);
+const SCOPED_VIEWS = new Set(["overview", "threat", "incidents", "review", "assess", "redteam", "traces", "sessions", "analytics", "prompts", "evals", "settings", "keys", "team", "audit"]);
 function load(view) {
   // Any re-render replaces the rows the filter was hiding, so drop the stale
   // "N of M match" note rather than leaving it contradicting the screen.
   if (searchInput) { searchInput.value = ""; const n = $("#searchNote"); if (n) n.textContent = ""; }
   if (!PROJECT && SCOPED_VIEWS.has(view)) { banner("Select an application from Applications to view its data."); return; }
-  ({ apps: loadApps, overview: loadOverview, threat: loadThreat, incidents: loadIncidents, review: loadReview, traces: loadTraces, sessions: loadSessions, analytics: loadAnalytics, evals: loadEvals, settings: loadSettings, keys: loadKeys, canaries: loadCanaries, alerts: loadAlerts, team: loadTeam, audit: loadAudit, admin: loadAdmin, customers: loadCustomers, adminusers: loadAdminUsers, auditall: loadAuditAll }[view] || (() => {}))();
+  ({ apps: loadApps, overview: loadOverview, threat: loadThreat, incidents: loadIncidents, review: loadReview, assess: loadAssess, traces: loadTraces, sessions: loadSessions, analytics: loadAnalytics, evals: loadEvals, settings: loadSettings, keys: loadKeys, canaries: loadCanaries, alerts: loadAlerts, team: loadTeam, audit: loadAudit, admin: loadAdmin, customers: loadCustomers, adminusers: loadAdminUsers, auditall: loadAuditAll }[view] || (() => {}))();
 }
 
 // ---------- Canaries ----------
@@ -789,6 +789,496 @@ async function revokeCanary(id) {
     if (!res.ok) { banner(d.error || "Revoke failed"); return; }
     loadCanaries();
   } catch (e) { banner("Revoke failed: " + e.message); }
+}
+
+// ---------- Assessments (static analysis: prompts + architecture) ----------
+// The other half of the platform. L1–L4 judge live traffic; this judges the
+// application as built — its prompts and its topology — before an attacker
+// sends anything. Deterministic by design: same input, same findings, so a fix
+// stays fixed and every score can explain itself.
+//
+// Severity note: the engine's lowest band is "informational", which has no pill
+// style and no glossary entry (the runtime taxonomy calls that band "info").
+// Every finding also carries `argus_severity` in the runtime spelling, so pills
+// are always rendered from THAT field. Rendering the native label would emit a
+// `pill-informational` class that doesn't exist and silently lose the styling.
+let ASSESS_TAB = "runs";
+let ASSESS_GRAPH = { nodes: [], edges: [], updatedAt: null };
+let ASSESS_GRAPH_LOADED = false;
+
+const ASSESS_NODE_TYPES = ["user", "model", "tool", "code_interpreter", "memory_store", "document_source", "vector_database", "external_website", "email_system", "file_upload", "other"];
+const ASSESS_EDGE_TYPES = ["sends_prompt", "invokes", "retrieves_data", "reads_data", "writes_data"];
+const ASSESS_DOC_KINDS = ["system", "developer", "tool_description", "memory_instruction", "output_instruction", "user"];
+const ASSESS_STATUSES = ["open", "resolved", "accepted"];
+
+// Running an assessment and saving a graph are member+ on the server; reflect
+// that here so a viewer gets a readable page instead of a button that 403s.
+const assessCanWrite = () => (ROLE_RANK[PROJECT_ROLE] ?? -1) >= 1;
+
+const assessOptions = (opts, current) => opts.map((o) => `<option value="${esc(o)}"${o === current ? " selected" : ""}>${esc(titleCase(o))}</option>`).join("");
+const assessInput = "font:inherit;font-size:12.5px;padding:7px 10px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink)";
+
+async function loadAssess() {
+  if (!PROJECT) { banner("Open an application from Applications to assess it."); return; }
+  banner("");
+  // The graph is read once per session and reused: the Runs tab derives its
+  // default context facts from it, which is what makes findings architecture-
+  // aware rather than generic.
+  if (!ASSESS_GRAPH_LOADED) {
+    try {
+      const g = await api("/api/assessment-graph");
+      ASSESS_GRAPH = { nodes: g?.nodes || [], edges: g?.edges || [], updatedAt: g?.updatedAt || null };
+      ASSESS_GRAPH_LOADED = true;
+    } catch { /* a missing graph is not an error — the editor starts empty */ }
+  }
+  renderAssessTab();
+}
+
+$("#assessTabs")?.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-atab]");
+  if (!b) return;
+  ASSESS_TAB = b.dataset.atab;
+  document.querySelectorAll("#assessTabs .dtab").forEach((x) => x.classList.toggle("active", x === b));
+  renderAssessTab();
+});
+
+function renderAssessTab() {
+  if (ASSESS_TAB === "findings") return renderAssessFindings();
+  if (ASSESS_TAB === "arch") return renderAssessArch();
+  return renderAssessRuns();
+}
+
+const assessPane = () => $("#assessPane");
+const assessLoading = () => { assessPane().innerHTML = '<div class="card"><div class="dim" style="padding:calc(var(--u)*4)">loading…</div></div>'; };
+const assessError = (e) => { assessPane().innerHTML = `<div class="card"><div class="empty" style="padding:calc(var(--u)*4)">${esc(String(e && e.message ? e.message : e))}</div></div>`; };
+
+/** Facts we can prove from the saved graph, so the run form starts truthful. */
+function assessFactsFromGraph() {
+  const n = ASSESS_GRAPH.nodes || [];
+  const tools = n.filter((x) => x.node_type === "tool");
+  return {
+    has_write_capable_tools: tools.some((t) => t.can_write),
+    human_approval_enabled: tools.length > 0 && tools.filter((t) => t.can_write).every((t) => t.requires_approval),
+    has_retrieval: n.some((x) => x.node_type === "document_source" || x.node_type === "vector_database"),
+  };
+}
+
+// ---- Runs tab -------------------------------------------------------------
+async function renderAssessRuns() {
+  assessLoading();
+  try {
+    const d = await api("/api/assessments");
+    const rows = d.assessments || [];
+    assessPane().innerHTML = assessRunFormHtml() + assessRunsTableHtml(rows);
+    wireAssessRunForm();
+  } catch (e) { assessError(e); }
+}
+
+function assessRunFormHtml() {
+  if (!assessCanWrite()) {
+    return '<div class="card"><div class="pad dim" style="padding:calc(var(--u)*3);font-size:12.5px">Running an assessment needs the <b>member</b> role. You can read past runs and findings below.</div></div>';
+  }
+  const f = assessFactsFromGraph();
+  const derived = ASSESS_GRAPH.nodes.length
+    ? '<span class="dim" style="font-size:11.5px">· pre-filled from your Architecture tab</span>'
+    : '<span class="dim" style="font-size:11.5px">· describe your app in the Architecture tab to pre-fill these</span>';
+  const check = (id, label, on) =>
+    `<label style="display:flex;gap:7px;align-items:center;font-size:12.5px;cursor:pointer"><input type="checkbox" id="${id}"${on ? " checked" : ""}> ${esc(label)}</label>`;
+  return `<div class="card">
+    <div class="card-head"><span class="card-title">Run an assessment</span></div>
+    <div class="pad" style="padding:calc(var(--u)*3);display:grid;gap:calc(var(--u)*2.5)">
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <div class="field" style="flex:1;min-width:200px">
+          <label for="assessDocName" style="font-size:12px;font-weight:600;display:block;margin-bottom:5px">Name this prompt</label>
+          <input id="assessDocName" type="text" placeholder="e.g. support agent system prompt" style="${assessInput};width:100%">
+        </div>
+        <div class="field" style="min-width:170px">
+          <label for="assessDocKind" style="font-size:12px;font-weight:600;display:block;margin-bottom:5px">Kind</label>
+          <select id="assessDocKind" style="${assessInput};width:100%">${assessOptions(ASSESS_DOC_KINDS, "system")}</select>
+        </div>
+      </div>
+      <div class="field">
+        <label for="assessDocContent" style="font-size:12px;font-weight:600;display:block;margin-bottom:5px">Paste the prompt template</label>
+        <textarea id="assessDocContent" rows="9" placeholder="You are a helpful assistant. …" style="${assessInput};width:100%;font-family:var(--font-mono);line-height:1.6"></textarea>
+        <div class="dim" style="font-size:11.5px;margin-top:5px">Not stored. Only the name, the facts below, and redacted evidence excerpts are kept.</div>
+      </div>
+      <div class="field">
+        <div style="font-size:12px;font-weight:600;margin-bottom:7px">Facts about this application ${derived}</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:8px">
+          ${check("assessCtxPublic", "Reachable by the public", false)}
+          ${check("assessCtxWrite", "Has write-capable tools", f.has_write_capable_tools)}
+          ${check("assessCtxApproval", "Human approval before writes", f.human_approval_enabled)}
+          ${check("assessCtxRetrieval", "Uses retrieval / RAG", f.has_retrieval)}
+          ${check("assessCtxSensitive", "Handles sensitive data", false)}
+          ${check("assessCtxControls", "Has compensating controls", false)}
+        </div>
+        <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
+          <label for="assessCtxCrit" style="font-size:12.5px">Business criticality</label>
+          <select id="assessCtxCrit" style="${assessInput}">${assessOptions(["low", "medium", "high", "critical"], "medium")}</select>
+        </div>
+      </div>
+      <div><button class="btn btn-primary" id="assessRunBtn" type="button" style="padding:8px 16px;font-size:12.5px">Run assessment</button></div>
+    </div>
+  </div>`;
+}
+
+function wireAssessRunForm() {
+  $("#assessRunBtn")?.addEventListener("click", runAssessment);
+  assessPane().querySelectorAll("[data-arun]").forEach((r) =>
+    r.addEventListener("click", () => openAssessRun(r.dataset.arun)));
+}
+
+function assessRunsTableHtml(rows) {
+  if (!rows.length) {
+    return `<div class="card" style="margin-top:calc(var(--u)*3)"><div class="empty-cta">
+      <div class="big">No assessments yet</div>
+      <p>Paste a prompt above and run one. It takes about a second — the rules are deterministic, so nothing is queued and nothing is sent to a model.</p>
+    </div></div>`;
+  }
+  return `<div class="card" style="margin-top:calc(var(--u)*3)">
+    <div class="card-head"><span class="card-title">Past runs</span></div>
+    <div class="tablewrap"><table class="feed"><tbody>
+      <tr><th>When</th><th>Kind</th><th>Findings</th><th>Worst</th><th>Risk</th><th></th></tr>
+      ${rows.map((r) => `<tr class="evt" data-arun="${esc(r.id)}" style="cursor:pointer">
+        <td class="mono dim">${esc(ago(r.created_at))}</td>
+        <td>${esc(titleCase(r.kind))}</td>
+        <td class="mono">${num(r.finding_count)}</td>
+        <td>${r.max_severity ? pill(r.max_severity === "informational" ? "info" : r.max_severity) : '<span class="dim">clean</span>'}</td>
+        <td class="mono">${r.overall_risk ? num(r.overall_risk) : "—"}</td>
+        <td class="dim" style="text-align:right">open →</td>
+      </tr>`).join("")}
+    </tbody></table></div>
+  </div>`;
+}
+
+async function runAssessment() {
+  const content = $("#assessDocContent").value.trim();
+  if (!content) { banner("Paste a prompt to assess."); return; }
+  const btn = $("#assessRunBtn");
+  btn.disabled = true; btn.textContent = "Running…";
+  try {
+    const res = await fetch("/api/assess/prompt", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        project: PROJECT,
+        documents: [{ kind: $("#assessDocKind").value, name: $("#assessDocName").value.trim(), content }],
+        context: {
+          is_public: $("#assessCtxPublic").checked,
+          has_write_capable_tools: $("#assessCtxWrite").checked,
+          human_approval_enabled: $("#assessCtxApproval").checked,
+          has_retrieval: $("#assessCtxRetrieval").checked,
+          has_sensitive_data: $("#assessCtxSensitive").checked,
+          has_compensating_controls: $("#assessCtxControls").checked,
+          business_criticality: $("#assessCtxCrit").value,
+        },
+      }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { banner(d.error || "Could not run the assessment."); return; }
+    banner("");
+    openAssessRun(d.id);
+  } catch (e) {
+    banner("Could not run the assessment: " + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = "Run assessment";
+  }
+}
+
+// ---- One run, in full -----------------------------------------------------
+async function openAssessRun(id) {
+  assessLoading();
+  try {
+    const a = await api("/api/assessment/" + encodeURIComponent(id));
+    const findings = a.findings || [];
+    const docs = Array.isArray(a.documents) ? a.documents : [];
+    assessPane().innerHTML = `
+      <div class="card">
+        <div class="card-head" style="display:flex;justify-content:space-between;align-items:center">
+          <span class="card-title">${esc(titleCase(a.kind))} assessment · ${esc(ago(a.created_at))}</span>
+          <button class="btn" id="assessBackBtn" type="button" style="padding:6px 12px;font-size:12px">← All runs</button>
+        </div>
+        <div class="pad" style="padding:calc(var(--u)*3);display:flex;gap:calc(var(--u)*5);flex-wrap:wrap;font-size:12.5px">
+          <div><div class="dim" style="font-size:11px">Findings</div><div class="mono" style="font-size:18px">${num(a.finding_count)}</div></div>
+          <div><div class="dim" style="font-size:11px">Worst</div><div>${a.max_severity ? pill(a.max_severity === "informational" ? "info" : a.max_severity) : '<span class="dim">clean</span>'}</div></div>
+          <div><div class="dim" style="font-size:11px">Highest risk</div><div class="mono" style="font-size:18px">${a.overall_risk ? num(a.overall_risk) : "—"}</div></div>
+          ${docs.length ? `<div><div class="dim" style="font-size:11px">Assessed</div><div>${docs.map((d) => esc(d.name || d.kind || "prompt")).join(", ")}</div></div>` : ""}
+          ${a.scoring_version ? `<div><div class="dim" style="font-size:11px">Scoring</div><div class="mono">v${esc(a.scoring_version)}</div></div>` : ""}
+        </div>
+      </div>
+      ${findings.length
+        ? findings.map(assessFindingCard).join("")
+        : `<div class="card" style="margin-top:calc(var(--u)*3)"><div class="empty-cta"><div class="big">No findings</div><p>Nothing in this ${esc(a.kind)} tripped a rule. That is a real result, not an empty screen — the same input will always produce the same answer.</p></div></div>`}`;
+    $("#assessBackBtn").addEventListener("click", renderAssessRuns);
+    wireAssessStatusControls();
+  } catch (e) { assessError(e); }
+}
+
+/**
+ * One finding. Everything interpolated here is engine output derived from
+ * customer prompts — i.e. attacker-authored text can reach `evidence` — so every
+ * field goes through esc(). The CSP is the backstop, not the control.
+ */
+function assessFindingCard(f) {
+  const risk = f.risk || {};
+  const mits = Array.isArray(f.mitigations) ? f.mitigations : [];
+  const fws = Array.isArray(f.frameworks) ? f.frameworks : [];
+  const factors = risk.factors || {};
+  return `<div class="card" style="margin-top:calc(var(--u)*3)">
+    <div class="card-head" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+      <span class="card-title" style="display:flex;gap:9px;align-items:center">
+        ${pill(f.argus_severity || "info")}
+        <span class="mono dim" style="font-size:11.5px">${esc(f.rule_id)}</span>
+        ${esc(f.title)}
+      </span>
+      ${risk.final_score != null ? `<span class="mono" style="font-size:13px">risk ${num(risk.final_score)}</span>` : ""}
+    </div>
+    <div class="pad" style="padding:calc(var(--u)*3);font-size:12.5px;color:var(--ink-muted);display:grid;gap:10px">
+      <div class="dim" style="font-size:11.5px">
+        ${esc(titleCase(f.category))}${f.confidence ? " · " + esc(f.confidence) + " confidence" : ""}${f.document_name ? " · " + esc(f.document_name) : ""}${Array.isArray(f.affected_lines) && f.affected_lines.length ? " · line " + esc(f.affected_lines.join(", ")) : ""}
+      </div>
+      <div>${esc(f.explanation)}</div>
+      ${f.evidence ? `<div class="mono" style="font-size:11.5px;background:var(--surface-2);border-radius:var(--radius);padding:9px 11px;word-break:break-word">${esc(f.evidence)}</div>` : ""}
+      ${f.recommendation ? `<div><b style="color:var(--ink)">Fix:</b> ${esc(f.recommendation)}</div>` : ""}
+      ${fws.length ? `<div class="dim" style="font-size:11.5px">${fws.map((x) => esc((x.framework || "") + " " + (x.requirement || ""))).join(" · ")}</div>` : ""}
+      ${risk.rationale ? `<details><summary style="cursor:pointer;font-size:12px">Why this score?</summary>
+        <div style="margin-top:8px">${esc(risk.rationale)}</div>
+        <div style="margin-top:8px;display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px" class="mono dim">
+          ${Object.keys(factors).map((k) => `<span>${esc(titleCase(k))} ${esc(factors[k])}/5</span>`).join("")}
+        </div></details>` : ""}
+      ${mits.length ? `<details><summary style="cursor:pointer;font-size:12px">${mits.length} recommended fix${mits.length > 1 ? "es" : ""}, best first</summary>
+        <div style="margin-top:8px;display:grid;gap:10px">
+          ${mits.map((m) => `<div style="border-left:2px solid var(--accent);padding-left:10px">
+            <div style="color:var(--ink);font-weight:600">${esc(m.title)}</div>
+            <div class="dim" style="font-size:11.5px;margin:2px 0 4px">${esc(m.priority)} priority · ${esc(m.difficulty)} effort · ~${esc(m.expected_risk_reduction)}% risk reduction</div>
+            <div>${esc(m.implementation_guidance)}</div>
+            ${m.validation_procedure ? `<div class="dim" style="font-size:11.5px;margin-top:4px"><b>Check it worked:</b> ${esc(m.validation_procedure)}</div>` : ""}
+          </div>`).join("")}
+        </div></details>` : ""}
+      ${f.id ? assessStatusControl(f) : ""}
+    </div>
+  </div>`;
+}
+
+function assessStatusControl(f) {
+  if (!assessCanWrite()) return `<div class="dim" style="font-size:11.5px">Status: ${esc(f.analyst_status || "open")}</div>`;
+  return `<div style="display:flex;gap:8px;align-items:center;font-size:12px">
+    <label for="st-${esc(f.id)}">Status</label>
+    <select id="st-${esc(f.id)}" data-astatus="${esc(f.id)}" style="${assessInput}">${assessOptions(ASSESS_STATUSES, f.analyst_status || "open")}</select>
+  </div>`;
+}
+
+function wireAssessStatusControls() {
+  assessPane().querySelectorAll("[data-astatus]").forEach((s) =>
+    s.addEventListener("change", () => setAssessFindingStatus(s.dataset.astatus, s.value)));
+}
+
+async function setAssessFindingStatus(findingId, status) {
+  try {
+    const res = await fetch("/api/assessment/finding/status", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ project: PROJECT, findingId, status }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { banner(d.error || "Could not update the finding."); return; }
+    banner("");
+  } catch (e) { banner("Could not update the finding: " + e.message); }
+}
+
+// ---- Findings tab (across every run) --------------------------------------
+async function renderAssessFindings() {
+  assessLoading();
+  try {
+    const d = await api("/api/assessment-findings");
+    const rows = d.findings || [];
+    if (!rows.length) {
+      assessPane().innerHTML = `<div class="card"><div class="empty-cta">
+        <div class="big">No findings yet</div>
+        <p>Findings appear here once you run an assessment. This view collects them across every run, so you can work through them without opening each run in turn.</p>
+      </div></div>`;
+      return;
+    }
+    assessPane().innerHTML = `<div class="card">
+      <div class="card-head"><span class="card-title">${num(rows.length)} finding${rows.length > 1 ? "s" : ""} across all runs</span></div>
+      <div class="tablewrap"><table class="feed"><tbody>
+        <tr><th>Severity</th><th>Rule</th><th>Finding</th><th>Category</th><th>Risk</th><th>Status</th></tr>
+        ${rows.map((f) => `<tr class="evt">
+          <td>${pill(f.argus_severity || "info")}</td>
+          <td class="mono dim" style="font-size:11.5px">${esc(f.rule_id)}</td>
+          <td>${esc(f.title)}${f.document_name ? `<div class="dim" style="font-size:11px">${esc(f.document_name)}</div>` : ""}</td>
+          <td class="dim">${esc(titleCase(f.category))}</td>
+          <td class="mono">${f.risk && f.risk.final_score != null ? num(f.risk.final_score) : "—"}</td>
+          <td>${assessStatusControl(f)}</td>
+        </tr>`).join("")}
+      </tbody></table></div>
+    </div>`;
+    wireAssessStatusControls();
+  } catch (e) { assessError(e); }
+}
+
+// ---- Architecture tab -----------------------------------------------------
+function renderAssessArch() {
+  const editable = assessCanWrite();
+  const n = ASSESS_GRAPH.nodes || [];
+  const e = ASSESS_GRAPH.edges || [];
+  assessPane().innerHTML = `
+    <div class="card">
+      <div class="card-head"><span class="card-title">How this application is put together</span></div>
+      <div class="pad dim" style="padding:calc(var(--u)*3) calc(var(--u)*3) 0;font-size:12.5px">
+        Describe the parts of your app and how data moves between them. Risk here comes from <b>shape</b>, not wording:
+        untrusted input reaching a trusted component, model output reaching an interpreter, a tool that can write without
+        anyone approving it. Filling this in also pre-fills the facts on the Runs tab.
+        ${ASSESS_GRAPH.updatedAt ? `<div style="margin-top:6px">Last saved ${esc(ago(ASSESS_GRAPH.updatedAt))}.</div>` : ""}
+      </div>
+      <div class="pad" style="padding:calc(var(--u)*3)">
+        <div style="font-size:12px;font-weight:600;margin-bottom:8px">Components</div>
+        <div class="tablewrap"><table class="feed"><tbody id="assessNodeRows">
+          <tr><th>Name</th><th>Type</th><th>Trust</th><th>Can write</th><th>Needs approval</th><th></th></tr>
+          ${n.map(assessNodeRow).join("")}
+        </tbody></table></div>
+        ${editable ? '<button class="btn" id="assessAddNode" type="button" style="margin-top:9px;padding:6px 12px;font-size:12px">+ Add component</button>' : ""}
+
+        <div style="font-size:12px;font-weight:600;margin:calc(var(--u)*4) 0 8px">Connections</div>
+        <div class="tablewrap"><table class="feed"><tbody id="assessEdgeRows">
+          <tr><th>From</th><th>To</th><th>What flows</th><th>Crosses tenants</th><th></th></tr>
+          ${e.map(assessEdgeRow).join("")}
+        </tbody></table></div>
+        ${editable ? '<button class="btn" id="assessAddEdge" type="button" style="margin-top:9px;padding:6px 12px;font-size:12px">+ Add connection</button>' : ""}
+
+        ${editable ? `<div style="margin-top:calc(var(--u)*4);display:flex;gap:8px">
+          <button class="btn btn-primary" id="assessSaveGraph" type="button" style="padding:8px 16px;font-size:12.5px">Save</button>
+          <button class="btn" id="assessAnalyzeGraph" type="button" style="padding:8px 16px;font-size:12.5px">Save &amp; analyze</button>
+        </div>` : '<div class="dim" style="margin-top:calc(var(--u)*3);font-size:12.5px">Editing needs the <b>member</b> role.</div>'}
+      </div>
+    </div>
+    <div id="assessArchResult"></div>`;
+  wireAssessArch();
+}
+
+function assessNodeRow(node, i) {
+  const idx = typeof i === "number" ? i : 0;
+  const dis = assessCanWrite() ? "" : " disabled";
+  return `<tr data-nrow="${idx}">
+    <td><input type="text" data-nfield="label" value="${esc(node.label || "")}" placeholder="e.g. support agent" style="${assessInput};width:100%"${dis}></td>
+    <td><select data-nfield="node_type" style="${assessInput}"${dis}>${assessOptions(ASSESS_NODE_TYPES, node.node_type || "other")}</select></td>
+    <td><select data-nfield="trust_level" style="${assessInput}"${dis}>${assessOptions(["trusted", "untrusted"], node.trust_level || "trusted")}</select></td>
+    <td style="text-align:center"><input type="checkbox" data-nfield="can_write"${node.can_write ? " checked" : ""}${dis}></td>
+    <td style="text-align:center"><input type="checkbox" data-nfield="requires_approval"${node.requires_approval ? " checked" : ""}${dis}></td>
+    <td style="text-align:right">${assessCanWrite() ? `<button class="btn" type="button" data-ndel="${idx}" style="padding:3px 8px;font-size:11px">remove</button>` : ""}</td>
+  </tr>`;
+}
+
+function assessEdgeRow(edge, i) {
+  const idx = typeof i === "number" ? i : 0;
+  const dis = assessCanWrite() ? "" : " disabled";
+  // Node ids are internal join keys, never shown — an unnamed row reads
+  // "(unnamed)" rather than leaking a generated id into the picker.
+  const opts = (cur) => (ASSESS_GRAPH.nodes || []).map((n) => `<option value="${esc(n.id)}"${n.id === cur ? " selected" : ""}>${esc(n.label || "(unnamed)")}</option>`).join("");
+  return `<tr data-erow="${idx}">
+    <td><select data-efield="source" style="${assessInput}"${dis}>${opts(edge.source)}</select></td>
+    <td><select data-efield="target" style="${assessInput}"${dis}>${opts(edge.target)}</select></td>
+    <td><select data-efield="edge_type" style="${assessInput}"${dis}>${assessOptions(ASSESS_EDGE_TYPES, edge.edge_type || "sends_prompt")}</select></td>
+    <td style="text-align:center"><input type="checkbox" data-efield="tenant_boundary"${edge.tenant_boundary ? " checked" : ""}${dis}></td>
+    <td style="text-align:right">${assessCanWrite() ? `<button class="btn" type="button" data-edel="${idx}" style="padding:3px 8px;font-size:11px">remove</button>` : ""}</td>
+  </tr>`;
+}
+
+function wireAssessArch() {
+  $("#assessAddNode")?.addEventListener("click", () => {
+    harvestAssessGraph();
+    // Ids are internal join keys for the analyzer, never shown; the label is
+    // what the user names. Generated here so a new row can be referenced by an
+    // edge immediately, before anything is saved.
+    ASSESS_GRAPH.nodes.push({ id: "n" + Date.now().toString(36) + ASSESS_GRAPH.nodes.length, label: "", node_type: "other", trust_level: "trusted", can_write: false, requires_approval: false, attributes: {} });
+    renderAssessArch();
+  });
+  $("#assessAddEdge")?.addEventListener("click", () => {
+    harvestAssessGraph();
+    if (ASSESS_GRAPH.nodes.length < 2) { banner("Add at least two components before connecting them."); return; }
+    banner("");
+    ASSESS_GRAPH.edges.push({ source: ASSESS_GRAPH.nodes[0].id, target: ASSESS_GRAPH.nodes[1].id, edge_type: "sends_prompt", tenant_boundary: false });
+    renderAssessArch();
+  });
+  assessPane().querySelectorAll("[data-ndel]").forEach((b) => b.addEventListener("click", () => {
+    harvestAssessGraph();
+    const gone = ASSESS_GRAPH.nodes[Number(b.dataset.ndel)];
+    ASSESS_GRAPH.nodes.splice(Number(b.dataset.ndel), 1);
+    // Drop edges that pointed at it, or the analyzer would read them as dangling.
+    if (gone) ASSESS_GRAPH.edges = ASSESS_GRAPH.edges.filter((e) => e.source !== gone.id && e.target !== gone.id);
+    renderAssessArch();
+  }));
+  assessPane().querySelectorAll("[data-edel]").forEach((b) => b.addEventListener("click", () => {
+    harvestAssessGraph();
+    ASSESS_GRAPH.edges.splice(Number(b.dataset.edel), 1);
+    renderAssessArch();
+  }));
+  $("#assessSaveGraph")?.addEventListener("click", () => saveAssessGraph(false));
+  $("#assessAnalyzeGraph")?.addEventListener("click", () => saveAssessGraph(true));
+}
+
+/** Read the DOM back into ASSESS_GRAPH so edits survive a re-render. */
+function harvestAssessGraph() {
+  const rows = assessPane().querySelectorAll("#assessNodeRows [data-nrow]");
+  rows.forEach((tr) => {
+    const n = ASSESS_GRAPH.nodes[Number(tr.dataset.nrow)];
+    if (!n) return;
+    tr.querySelectorAll("[data-nfield]").forEach((el) => {
+      n[el.dataset.nfield] = el.type === "checkbox" ? el.checked : el.value;
+    });
+  });
+  assessPane().querySelectorAll("#assessEdgeRows [data-erow]").forEach((tr) => {
+    const e = ASSESS_GRAPH.edges[Number(tr.dataset.erow)];
+    if (!e) return;
+    tr.querySelectorAll("[data-efield]").forEach((el) => {
+      e[el.dataset.efield] = el.type === "checkbox" ? el.checked : el.value;
+    });
+  });
+}
+
+async function saveAssessGraph(thenAnalyze) {
+  harvestAssessGraph();
+  if (ASSESS_GRAPH.nodes.some((n) => !String(n.label || "").trim())) { banner("Give every component a name."); return; }
+  try {
+    const res = await fetch("/api/assessment/graph", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ project: PROJECT, nodes: ASSESS_GRAPH.nodes, edges: ASSESS_GRAPH.edges }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { banner(d.error || "Could not save the architecture."); return; }
+    banner("");
+    ASSESS_GRAPH.updatedAt = new Date().toISOString();
+    if (thenAnalyze) return analyzeAssessGraph();
+    renderAssessArch();
+  } catch (e) { banner("Could not save the architecture: " + e.message); }
+}
+
+async function analyzeAssessGraph() {
+  try {
+    const res = await fetch("/api/assessment/graph/analyze", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ project: PROJECT }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { banner(d.error || "Could not analyze the architecture."); return; }
+    banner("");
+    const findings = d.findings || [];
+    $("#assessArchResult").innerHTML = findings.length
+      ? `<div class="card" style="margin-top:calc(var(--u)*3)">
+           <div class="card-head"><span class="card-title">${num(findings.length)} architectural weakness${findings.length > 1 ? "es" : ""}</span></div>
+           <div class="pad" style="padding:calc(var(--u)*3);display:grid;gap:12px;font-size:12.5px">
+             ${findings.map((i) => `<div style="display:flex;gap:10px;align-items:flex-start">
+               ${pill(i.argus_severity || "info")}
+               <div><div style="color:var(--ink)">${esc(i.message)}</div>
+               <div class="dim" style="font-size:11.5px">${esc(titleCase(i.rule))}</div></div>
+             </div>`).join("")}
+           </div>
+           <div class="pad dim" style="padding:0 calc(var(--u)*3) calc(var(--u)*3);font-size:11.5px">Saved as a run — it appears under Runs and its findings under Findings.</div>
+         </div>`
+      : `<div class="card" style="margin-top:calc(var(--u)*3)"><div class="empty-cta"><div class="big">No architectural weaknesses found</div><p>Nothing in the shape of this application tripped a rule.</p></div></div>`;
+  } catch (e) { banner("Could not analyze the architecture: " + e.message); }
 }
 
 // ---------- Data governance (retention + erasure) ----------

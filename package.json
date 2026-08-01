@@ -12,6 +12,7 @@
     "worker": "npm --workspace @argus/worker run dev",
     "typecheck": "tsc -b --pretty",
     "test": "tsx --test tests/*.test.ts",
+    "test:extension": "node apps/extension/test/scanner.test.js && node apps/extension/test/adapters.test.js",
     "test:isolation": "tsx --test --test-concurrency=1 --test-timeout=120000 tests/integration/*.test.ts"
   },
   "engines": {

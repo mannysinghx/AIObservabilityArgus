@@ -1,0 +1,59 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body { width: 260px; margin: 0; font-family: ui-monospace, Menlo, monospace; background: #0b1220; color: #dbe6f3; }
+      .p { padding: 12px 14px; }
+      h1 { font-size: 14px; margin: 0 0 2px; color: #4f8cff; }
+      .sub { font-size: 11px; color: #8098b4; margin-bottom: 10px; }
+      label { display: block; font-size: 11px; color: #8098b4; margin: 8px 0 4px; }
+      select { width: 100%; background: #131c2e; color: #dbe6f3; border: 1px solid #22304a; border-radius: 6px; padding: 6px; font: inherit; }
+      .stats { display: flex; gap: 10px; margin-top: 12px; }
+      .stat { flex: 1; background: #131c2e; border: 1px solid #22304a; border-radius: 8px; padding: 8px; text-align: center; }
+      .num { font-size: 20px; font-weight: 700; color: #4f8cff; }
+      .lbl { font-size: 10px; color: #8098b4; }
+      .foot { font-size: 10px; color: #8098b4; margin-top: 10px; line-height: 1.5; }
+    </style>
+  </head>
+  <body>
+    <div class="p">
+      <h1>🛡 Argus</h1>
+      <div class="sub">Real-time prompt guard · local & zero-latency</div>
+
+      <label for="mode">Mode</label>
+      <select id="mode">
+        <option value="warn">Warn — show risks inline</option>
+        <option value="monitor">Monitor — count only</option>
+        <option value="off">Off</option>
+      </select>
+
+      <div class="stats">
+        <div class="stat"><div class="num" id="seen">0</div><div class="lbl">prompts seen</div></div>
+        <div class="stat"><div class="num" id="risky">0</div><div class="lbl">risky</div></div>
+      </div>
+
+      <hr style="border:none;border-top:1px solid #22304a;margin:12px 0" />
+      <label>Muted rules (per-site)</label>
+      <div id="allowlist" style="font-size:11px;line-height:1.6"></div>
+      <div id="allowlistEmpty" style="font-size:10px;color:#8098b4">None yet — click "mute on this site" on a finding to add one.</div>
+
+      <hr style="border:none;border-top:1px solid #22304a;margin:12px 0" />
+      <label style="display:flex;align-items:center;gap:8px;margin:0">
+        <input type="checkbox" id="report" /> <span>Report verdicts to Argus</span>
+      </label>
+      <div id="reportFields" style="display:none">
+        <label for="apiUrl">Argus ingest URL</label>
+        <input id="apiUrl" type="text" placeholder="https://ingest.your-argus.com"
+               style="width:100%;background:#131c2e;color:#dbe6f3;border:1px solid #22304a;border-radius:6px;padding:6px;font:inherit;font-size:11px" />
+        <label for="apiKey">API key (Argus → Manage → API Keys)</label>
+        <input id="apiKey" type="password" placeholder="ak_live_…"
+               style="width:100%;background:#131c2e;color:#dbe6f3;border:1px solid #22304a;border-radius:6px;padding:6px;font:inherit;font-size:11px" />
+        <div style="font-size:10.5px;color:#8fa3bf;margin-top:4px">The key decides which application these land under, so use one made for this purpose.</div>
+      </div>
+
+      <div class="foot">Prompts are evaluated locally. Reporting sends metadata only (severity, rule ids, provider) — never prompt text.</div>
+    </div>
+    <script src="popup.js"></script>
+  </body>
+</html>

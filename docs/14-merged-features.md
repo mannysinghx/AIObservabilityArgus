@@ -349,10 +349,48 @@ was accepted, authorized, and then produced no findings.
 |---|---|---|
 | Hash-chained tamper-evident audit + `verify` endpoint | `injectguard/apps/api/injectguard_api/services/audit.py` | Argus has an audit log and writes to it throughout; what is missing is the *tamper-evidence* — a per-tenant hash chain you can verify. Worth having for a compliance story, but InjectGuard's version orders by `created_at` and does an unsynchronized read-prev-then-append, so concurrent writes in one org can fork the chain. Port it after fixing that (monotonic sequence column + per-org lock), not before. |
 | Policy scope inheritance + exceptions | `services/policies.py` | The evaluator and flat per-project storage are merged. InjectGuard additionally resolved `organization < workspace < application` precedence and let a matched policy be suppressed by a recorded exception. Neither is ported: Argus has no workspace tier, and nobody has yet needed to grant an exception. Add when a real policy set outgrows on/off. |
-| Browser Guard extension + telemetry ingest | `injectguard/apps/extension/` | See *Phase 5* below — it needs a decision, not just a port. |
+*(The Browser Guard extension was on this list; it is now ported — see below.)*
 
 The standalone InjectGuard deployment (Railway project `injectguard-prod`) keeps
 running untouched until Phase 5. Nothing in this merge has changed it.
+
+### 12. Browser Guard extension
+
+The one part of the platform that protects a *person* rather than an
+*application*: an MV3 extension that scans what someone is about to paste into
+ChatGPT, Claude, Gemini and a dozen other chat apps, locally, before it is sent.
+
+| | |
+|---|---|
+| **Code** | [`apps/extension/`](../apps/extension/) — see its README |
+| **Mapping** | [`packages/shared/src/promptEvents.ts`](../packages/shared/src/promptEvents.ts) — `mapPromptEvent`, `EXTENSION_RULE_CATEGORY` |
+| **Ingest API** | `POST /api/public/prompt-events` (same `ak_live_` key auth as every other ingestion route) |
+| **Storage** | normal traces/observations/security_events, in the `browser-extension` environment |
+| **Tests** | `tests/promptEvents.test.ts`, plus the extension's own suite now wired into CI (`npm run test:extension`) |
+
+**Prompt text never leaves the browser.** Scanning is local; only the verdict —
+which rules fired, how severe, which site — is reported, and only if the user
+turns reporting on. A test asserts that a report built from nothing but
+sensitive strings carries none of them, because that promise is the reason
+anyone would install this and it would otherwise be easy to break silently.
+
+Reports become ordinary rows rather than living in a private table, so they
+appear in Threat Center, Traces and Analytics and inherit per-project scoping,
+retention, alerting and suppression for free. The absence of content is already
+a supported state (a project with redaction set to `drop_content` stores the
+same shape), so nothing downstream needed a special case.
+
+Two things worth knowing:
+
+- **Provenance is explicit.** These findings carry `source: browser_extension`
+  (ClickHouse migration `004_event_source.sql`, defaulting to `server`). An
+  extension report is an assertion from a client with no content to re-check —
+  materially weaker evidence than a detection Argus derived itself, and an
+  analyst triaging an incident needs to be able to tell.
+- **Rule ids keep the `IG-` prefix.** They are stable identifiers the server
+  maps on; renaming them would orphan every stored finding. Unmapped rule ids
+  are dropped rather than guessed at, so an extension that ships a new rule
+  ahead of the server degrades quietly instead of polluting the taxonomy.
 
 ---
 
@@ -376,18 +414,12 @@ railway link -p injectguard-prod && railway variables --service Postgres
 # then count rows in assessments / findings / applications
 ```
 
-**2. What happens to the Browser Guard extension?** It is the one piece with
-users outside the platform, and repointing it is **not** a config change despite
-`apiUrl` being user-settable. It posts InjectGuard's `prompt-events` shape
-authenticated with a 90-day org-scoped ingest token; Argus ingest speaks the
-native batch/OTLP shapes and authenticates with `ak_live_` keys. Options, in
-increasing order of effort:
-
-- *Retire it.* Simplest, and honest if it has no real installs.
-- *Compatibility endpoint.* Add a `prompt-events` route to Argus ingest that
-  maps the extension's payload onto observations. Users change one URL.
-- *Update the extension.* Emit Argus's format and accept an `ak_live_` key.
-  Cleanest long-term, but every existing install must update.
+**2. ~~What happens to the Browser Guard extension?~~ Done.** It now lives at
+[`apps/extension/`](../apps/extension/) and reports to Argus directly — see
+*Browser Guard extension* above. Existing installs need to update and re-enter
+their settings: the endpoint moved and the credential type changed from a
+90-day ingest token to an `ak_live_` API key, so the old configuration cannot
+be carried across.
 
 **3. Sequence, once those are answered.** Take a Postgres dump first and keep it
 somewhere durable — a dump costs nothing and un-deleting a Railway volume is not

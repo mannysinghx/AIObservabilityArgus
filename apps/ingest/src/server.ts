@@ -5,6 +5,8 @@ import {
   redis,
   STREAM_KEY,
   IngestBatch,
+  PromptEventBatch,
+  mapPromptEvent,
   otlpToObservations,
   loadProjectConfig,
   redactObservation,
@@ -136,6 +138,50 @@ app.post("/api/public/ingestion", async (req, reply) => {
   const n = await pushEvents(projectId, parsed.data);
   metrics.inc("argus_ingest_events_total", { endpoint: "native" }, n, "Telemetry events accepted");
   reply.code(202).send({ accepted: n });
+});
+
+/**
+ * Browser Guard reports.
+ *
+ * The extension scans a prompt locally and posts the verdict — never the text.
+ * Authentication is the same `ak_live_` key as every other ingestion route (the
+ * preHandler above already resolved it to a project), so an extension install is
+ * scoped to exactly one application and can write nowhere else.
+ *
+ * Sampling is deliberately NOT applied. These arrive one per risky prompt rather
+ * than one per span, so the volume is a rounding error next to normal telemetry,
+ * and dropping a "someone pasted an API key into ChatGPT" report to honour a
+ * trace sample rate would be losing the signal to save nothing.
+ */
+app.post("/api/public/prompt-events", async (req, reply) => {
+  const projectId = (req as unknown as { projectId: string }).projectId;
+  const parsed = PromptEventBatch.safeParse(req.body);
+  if (!parsed.success) {
+    reply.code(400).send({ error: "invalid batch", details: parsed.error.issues });
+    return;
+  }
+
+  const r = redis();
+  const pipeline = r.pipeline();
+  let accepted = 0;
+  let stored = 0;
+  for (const ev of parsed.data.events) {
+    accepted++;
+    const mapped = mapPromptEvent(ev);
+    if (!mapped) continue; // clean prompt, or no rule we recognise — see mapPromptEvent
+    const push = (e: StreamEvent) => pipeline.xadd(STREAM_KEY, "*", "event", JSON.stringify(e));
+    push({ projectId, kind: "trace", payload: mapped.trace });
+    push({ projectId, kind: "observation", payload: mapped.observation });
+    push({ projectId, kind: "finding", payload: mapped.findings });
+    stored++;
+  }
+  await pipeline.exec();
+
+  metrics.inc("argus_ingest_events_total", { endpoint: "prompt-events" }, stored, "Telemetry events accepted");
+  // `accepted` is what the caller sent, `stored` what was worth keeping. The
+  // extension uses neither, but the difference is the first thing to look at
+  // when someone reports "my reports aren't showing up".
+  reply.code(202).send({ accepted, stored });
 });
 
 /**

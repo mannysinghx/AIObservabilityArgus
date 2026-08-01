@@ -43,6 +43,12 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      # The Browser Guard extension ships as its own artifact and is not covered
+      # by tsc (plain JS, no build). Its scanner and site adapters had tests that
+      # ran nowhere — which is the same as not having them.
+      - name: Browser Guard extension tests
+        run: npm run test:extension
+
   isolation:
     name: Tenant isolation
     runs-on: ubuntu-latest

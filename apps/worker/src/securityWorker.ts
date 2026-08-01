@@ -47,6 +47,10 @@ function findingToRow(
     l3_verdict: f.l3_verdict ?? "",
     l4_signals: f.l4_signals ?? [],
     evidence_excerpt: f.evidence_excerpt ?? "",
+    // Provenance. Defaults to 'server' so every existing caller is unchanged;
+    // client-asserted findings (Browser Guard) say so, because an analyst
+    // triaging one cannot re-derive it from a trace.
+    source: f.source ?? "server",
     // The fingerprint of the content this finding was raised on. This is what
     // makes "the same poisoned document has now hit N traces" possible — the
     // Incidents view groups events by it. It used to be hardcoded to "", and
@@ -99,6 +103,17 @@ export async function handleSecurityBatch(events: StreamEvent[]) {
     // (~30s) and fails open to defaults, so a config read never stalls scanning.
     const cfg = await loadProjectConfig(ev.projectId);
     const minSeverity = cfg.alerting.min_severity;
+
+    if (ev.kind === "finding") {
+      // Pre-computed findings from a client that did its own scanning (Browser
+      // Guard). There is nothing to scan — the point of that extension is that
+      // the prompt never leaves the browser — so these go straight to the same
+      // persistence path as server-side findings, which means they inherit
+      // dedup, the alert threshold and suppression rules for free.
+      const findings = ev.payload as Finding[];
+      await persistAndAlert(ev.projectId, findings, minSeverity, new Map());
+      continue;
+    }
 
     if (ev.kind === "observation") {
       const o = ev.payload as ObservationInput;

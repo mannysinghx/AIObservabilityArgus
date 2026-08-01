@@ -65,11 +65,35 @@ export const IngestBatch = z.object({
 });
 export type IngestBatch = z.infer<typeof IngestBatch>;
 
+/**
+ * One Browser Guard report. The extension scans a prompt locally and sends the
+ * VERDICT ONLY — which rules fired, how bad, on which site. Prompt text never
+ * leaves the browser, so there is deliberately no content field here and adding
+ * one later would break the promise the extension makes to its users.
+ */
+export const PromptEvent = z.object({
+  provider: z.string().max(200).default("unknown"),
+  channel: z.string().max(50).default("fetch"),
+  severity: z.enum(["ok", "info", "low", "medium", "high", "critical"]).default("ok"),
+  finding_count: z.number().int().min(0).max(100).default(0),
+  rule_ids: z.array(z.string().max(60)).max(50).default([]),
+  /** Client clock, advisory only — the server stamps its own time. */
+  at: z.string().max(40).optional(),
+});
+export type PromptEvent = z.infer<typeof PromptEvent>;
+
+export const PromptEventBatch = z.object({
+  events: z.array(PromptEvent).max(200),
+});
+export type PromptEventBatch = z.infer<typeof PromptEventBatch>;
+
 /** Envelope pushed onto the Redis stream, tagged with the authenticated project. */
 export interface StreamEvent {
   projectId: string;
-  kind: "trace" | "observation";
-  payload: TraceInput | ObservationInput;
+  /** 'finding' carries pre-computed findings from a client that did its own
+   *  scanning; the worker persists them rather than scanning for them. */
+  kind: "trace" | "observation" | "finding";
+  payload: TraceInput | ObservationInput | Finding[];
 }
 
 /** Detection service response shapes (subset we consume). */
@@ -88,4 +112,9 @@ export interface Finding {
   /** Set when this is a canary finding — lets the worker stamp the canary as
    *  triggered without re-deriving which one matched. */
   canary_id?: string;
+  /** Provenance. Omitted means 'server': the pipeline scanned content Argus
+   *  holds, so the finding can be re-derived from the trace. 'browser_extension'
+   *  means a client asserted it after scanning locally — there is no content to
+   *  re-check, which an analyst triaging it needs to know. */
+  source?: "server" | "browser_extension";
 }

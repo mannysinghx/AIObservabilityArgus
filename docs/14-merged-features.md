@@ -358,6 +358,50 @@ running untouched until Phase 5. Nothing in this merge has changed it.
 
 ---
 
+## Phase 5 — retiring the standalone InjectGuard deployment
+
+**Not started. Requires an explicit decision, because it shuts down live
+services.** As of this writing `injectguard-prod` (Railway) is up and answering:
+Postgres, Redis, `injectguard-api`, `injectguard-worker`, `injectguard-web`.
+
+Everything the merged product needs from InjectGuard is already ported and
+running in Argus. What remains is disposal, and disposal has three questions
+that only the owner can answer.
+
+**1. Is there anything in it worth keeping?** The deployment was seeded with a
+demo organization. If real assessments have been run against it since, those
+rows exist only there — Argus has no import path for them, and building one is
+only worth doing if the answer is yes. Check before anything is switched off:
+
+```bash
+railway link -p injectguard-prod && railway variables --service Postgres
+# then count rows in assessments / findings / applications
+```
+
+**2. What happens to the Browser Guard extension?** It is the one piece with
+users outside the platform, and repointing it is **not** a config change despite
+`apiUrl` being user-settable. It posts InjectGuard's `prompt-events` shape
+authenticated with a 90-day org-scoped ingest token; Argus ingest speaks the
+native batch/OTLP shapes and authenticates with `ak_live_` keys. Options, in
+increasing order of effort:
+
+- *Retire it.* Simplest, and honest if it has no real installs.
+- *Compatibility endpoint.* Add a `prompt-events` route to Argus ingest that
+  maps the extension's payload onto observations. Users change one URL.
+- *Update the extension.* Emit Argus's format and accept an `ak_live_` key.
+  Cleanest long-term, but every existing install must update.
+
+**3. Sequence, once those are answered.** Take a Postgres dump first and keep it
+somewhere durable — a dump costs nothing and un-deleting a Railway volume is not
+a thing. Then: repoint or retire the extension → confirm no traffic is reaching
+`injectguard-api` → remove the public domains (reversible, and a good pause
+point) → delete the services → keep or delete the volume last, deliberately.
+
+Until then the two systems coexist harmlessly: the merge added to Argus and
+changed nothing in `injectguard-prod`.
+
+---
+
 ## Verifying a deployment
 
 ```bash

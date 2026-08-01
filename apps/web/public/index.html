@@ -75,6 +75,9 @@
     .open-page { margin-top:10px; }
     .example-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin: 6px 0 12px; }
   </style>
+  <!-- Blocking, and before the body renders: applying the saved theme any later
+       shows a flash of the wrong colours on every page load. -->
+  <script src="/appearance.js?v=__ASSETV__"></script>
 </head>
 <body>
 <div class="shell">
@@ -145,6 +148,7 @@
           <button data-range="30d">Last 30 days</button>
         </div>
       </div>
+      <button class="ctx" type="button" id="themeToggle" title="Switch theme" aria-label="Switch theme" style="min-width:34px;justify-content:center">☾</button>
       <button class="ctx" type="button" id="refreshBtn">↻ Refresh</button>
       <label class="searchbox" title="Paste a trace ID to open it, or type to filter the current page">
         <span class="s-ico" aria-hidden="true">⌕</span>
@@ -716,7 +720,9 @@
                 <button class="swatch" type="button" data-val="ember" data-name="Ember" style="background:#D26A3F"></button>
                 <button class="swatch" type="button" data-val="steel" data-name="Steel" style="background:#5C7C9E"></button>
               </div></div>
-            <div class="set-row"><div class="set-name">Density</div><div class="set-desc">Compact fits ~30% more rows per screen.</div>
+            <div class="set-row"><div class="set-name">Text size</div><div class="set-desc">Scales the whole interface, not just the type, so nothing gets cramped. Applies instantly and is remembered on this device.</div>
+              <div class="seg" data-set="fontsize"><button type="button" data-val="s">Small</button><button type="button" data-val="" class="on">Default</button><button type="button" data-val="l">Large</button><button type="button" data-val="xl">Extra large</button></div></div>
+            <div class="set-row"><div class="set-name">Density</div><div class="set-desc">Compact fits ~30% more rows per screen. Works alongside text size.</div>
               <div class="seg" data-set="density"><button type="button" data-val="" class="on">Comfortable</button><button type="button" data-val="compact">Compact</button></div></div>
             <div class="set-row"><div class="set-name">Corner radius</div><div class="set-desc">Zero for a squared, terminal-like feel.</div>
               <div class="seg" data-set="radius"><button type="button" data-val="0">0</button><button type="button" data-val="" class="on">6</button><button type="button" data-val="10">10</button></div></div>
@@ -1359,10 +1365,12 @@
                 <tr><th>Control</th><th>Options &amp; effect</th></tr>
                 <tr><td>Theme</td><td><b>System</b> (follows your OS light/dark setting, the default), <b>Light</b>, or <b>Dark</b> — forces a specific theme regardless of your OS.</td></tr>
                 <tr><td>Accent</td><td>Four color choices (Radar teal, Indigo, Ember, Steel) for interactive elements — links, buttons, highlights. This is purely cosmetic: <b>severity colors are always fixed</b> (critical is always red-ish, high is always orange), so an alert reads the same no matter your accent choice.</td></tr>
+                <tr><td>Text size</td><td><b>Small</b>, <b>Default</b>, <b>Large</b> or <b>Extra large</b>. This scales the entire interface, not just the type — spacing, controls and tables grow with it — so larger text doesn't end up crammed into the same layout. Works alongside Density: text size sets how big things are, density sets how tightly they're packed.</td></tr>
                 <tr><td>Density</td><td><b>Comfortable</b> (default) or <b>Compact</b>, which tightens spacing to fit roughly 30% more rows on screen — useful when triaging a long attack feed.</td></tr>
                 <tr><td>Corner radius</td><td><b>0</b> (square, terminal-like), <b>6</b> (default), or <b>10</b> (soft) — controls the roundedness of cards, buttons, and pills throughout the app.</td></tr>
               </table>
-              <div class="callout warn"><b>Not saved yet:</b> appearance choices apply immediately to your current browser tab, but reset to the defaults on reload. Per-user persistence is planned but not implemented in this build.</div>
+              <p><b>Your choices are remembered.</b> They're stored in this browser, on this device, and applied before the page draws — so there's no flash of the wrong theme when you load Argus, and nothing resets when you come back tomorrow. They are deliberately not tied to your account: the same person often wants dark on a laptop at night and light on a bright monitor, and syncing the setting would get one of those wrong.</p>
+              <p>There's also a <b>light/dark toggle in the top bar</b> (the ☾ / ☀ button) for flipping quickly without coming here. Use this page when you want “follow my OS” or any of the other options.</p>
               <button class="btn open-page" type="button" data-nav="appearance">Open Settings →</button>
             </article>
 

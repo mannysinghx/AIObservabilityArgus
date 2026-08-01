@@ -71,6 +71,12 @@
   :root[data-theme="dark"][data-accent="indigo"], :root[data-accent="indigo"]  { }
   /* density */
   :root[data-density="compact"] { --u: 4px; --fs: 12.5px; }
+  /* text size — scales the whole interface (see the `zoom` note on body).
+   * Steps are deliberately gentle: 90% still fits the tables, 125% is about the
+   * largest that keeps the sidebar and a data table side by side on a laptop. */
+  :root[data-fontsize="s"]  { --ui-scale: .9; }
+  :root[data-fontsize="l"]  { --ui-scale: 1.12; }
+  :root[data-fontsize="xl"] { --ui-scale: 1.25; }
   /* radius option */
   :root[data-radius="0"]  { --radius: 0px; }
   :root[data-radius="10"] { --radius: 10px; }
@@ -81,18 +87,35 @@
     background: var(--bg); color: var(--ink);
     font-family: var(--font-ui); font-size: var(--fs);
     line-height: 1.45; -webkit-font-smoothing: antialiased;
+    /* Text size preference.
+     *
+     * This scales the whole interface rather than only `--fs`. The design system
+     * is px-based — 71 of the 79 font-size declarations in this file are literal
+     * pixel values — so scaling the token alone would resize about a tenth of
+     * the text and look broken. `zoom` scales type, spacing and controls
+     * together, which is also what someone means when they ask for bigger text:
+     * bigger text in a proportionally bigger frame, not bigger text crammed into
+     * the same one.
+     *
+     * The cost is that viewport units inside a zoomed subtree render scaled, so
+     * the two `100vh` rules below divide it back out. That is the entire
+     * trade-off, and it is contained to those two rules. */
+    zoom: var(--ui-scale, 1);
   }
   .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
   .num  { font-variant-numeric: tabular-nums; }
 
   /* ---------- app shell ---------- */
-  .shell { display: flex; min-height: 100vh; }
+  /* `100vh` inside the zoomed body would render as 100vh × scale — at 125% the
+   * sidebar becomes a quarter taller than the window and scrolls the page.
+   * Dividing by the scale gives back a true viewport height. */
+  .shell { display: flex; min-height: calc(100vh / var(--ui-scale, 1)); }
   .rail {
     width: 208px; flex: none; background: var(--surface);
     border-right: 1px solid var(--line);
     display: flex; flex-direction: column;
     padding: calc(var(--u)*3) 0;
-    position: sticky; top: 0; height: 100vh;
+    position: sticky; top: 0; height: calc(100vh / var(--ui-scale, 1));
     overflow-y: auto; overscroll-behavior: contain;
     scrollbar-width: thin; scrollbar-color: var(--line) transparent;
   }
@@ -143,7 +166,27 @@
     padding: calc(var(--u)*2) calc(var(--u)*5);
     border-bottom: 1px solid var(--line); background: var(--surface);
     position: sticky; top: 0; z-index: 5;
+    /* Deliberately does NOT wrap. The bar was sized to fit exactly on a wide
+     * window, so anything that made its contents bigger — a larger text size, a
+     * long application name, a narrow laptop — used to spill over and give the
+     * whole dashboard a horizontal scrollbar.
+     *
+     * Wrapping looks like the fix and isn't: flexbox wraps in preference to
+     * shrinking, so the decorative tagline stayed full width and pushed the
+     * account menu onto a row of its own, which reads as broken rather than
+     * tight. Staying on one line and letting the two elastic items below give
+     * way keeps it to a single row at every text size. */
   }
+  /* The search field is the one element here that can afford to give up space,
+     so let it shrink before anything wraps — but not grow, or it pushes the
+     items after it onto a second row on a window that had room for one. */
+  .topbar .searchbox { flex: 0 1 190px; min-width: 110px; }
+  .topbar .searchbox input { width: 100%; }
+  /* The tagline is decoration; the account menu is not. Let the tagline
+     truncate so the avatar never gets pushed onto a row of its own, which reads
+     as a broken layout rather than a tight one. */
+  .topbar .cmdk { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .topbar .menu { flex: none; }
   .ctx {
     display: inline-flex; align-items: center; gap: 7px;
     border: 1px solid var(--line); border-radius: var(--radius);

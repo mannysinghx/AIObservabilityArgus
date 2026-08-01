@@ -644,15 +644,66 @@ async function loadEvals() {
 }
 
 // ---------- appearance + range + refresh ----------
+// Applying the change is appearance.js's job (it also runs before first paint on
+// the next load); this file only drives the controls. Before, a chosen theme was
+// applied to the live DOM and forgotten — every reload went back to whatever the
+// OS said, which made the setting look broken.
+const AP = window.ArgusAppearance;
+
+function markGroup(group, val) {
+  group.querySelectorAll("button").forEach((b) => {
+    const on = (b.dataset.val || "") === (val || "");
+    b.classList.toggle("on", on);
+    if (group.classList.contains("swatches")) b.style.border = on ? "2px solid var(--ink)" : "2px solid transparent";
+  });
+}
+
+/** Light up the buttons that match what's actually applied. */
+function syncAppearanceControls() {
+  if (!AP) return;
+  const prefs = AP.read();
+  document.querySelectorAll(".seg[data-set], .swatches[data-set]").forEach((group) => {
+    const key = group.dataset.set;
+    // Theme's default is the literal value "system"; the others default to "".
+    markGroup(group, prefs[key] || (key === "theme" ? "system" : ""));
+  });
+  updateThemeToggle();
+}
+
 document.querySelectorAll(".seg[data-set], .swatches[data-set]").forEach((group) => {
   group.addEventListener("click", (e) => {
     const btn = e.target.closest("button"); if (!btn) return;
-    group.querySelectorAll("button").forEach((b) => { b.classList.toggle("on", b === btn); if (group.classList.contains("swatches")) b.style.border = b === btn ? "2px solid var(--ink)" : "2px solid transparent"; });
     const key = group.dataset.set, val = btn.dataset.val;
-    if (key === "theme") { val === "system" ? document.documentElement.removeAttribute("data-theme") : document.documentElement.setAttribute("data-theme", val); }
-    else { val ? document.documentElement.setAttribute("data-" + key, val) : document.documentElement.removeAttribute("data-" + key); }
+    markGroup(group, val);
+    if (AP) AP.save(key, val);
+    updateThemeToggle();
   });
 });
+
+// One-click light/dark in the topbar. The Appearance page keeps the full set
+// (including "follow the OS"), but flipping the lights is the one people do
+// often enough that three clicks to reach it is three too many.
+function currentTheme() {
+  const set = document.documentElement.getAttribute("data-theme");
+  if (set) return set;
+  return window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+}
+function updateThemeToggle() {
+  const b = $("#themeToggle");
+  if (!b) return;
+  const next = currentTheme() === "dark" ? "light" : "dark";
+  // The icon shows what you'd switch TO, which is the convention people expect.
+  b.textContent = next === "light" ? "☀" : "☾";
+  b.title = `Switch to ${next} theme`;
+  b.setAttribute("aria-label", b.title);
+}
+$("#themeToggle")?.addEventListener("click", () => {
+  const next = currentTheme() === "dark" ? "light" : "dark";
+  if (AP) AP.save("theme", next);
+  else document.documentElement.setAttribute("data-theme", next);
+  syncAppearanceControls();
+});
+syncAppearanceControls();
 const rangeMenu = $("#rangeMenu");
 $("#rangeBtn").addEventListener("click", (e) => { e.stopPropagation(); rangeMenu.classList.toggle("open"); });
 document.addEventListener("click", () => rangeMenu.classList.remove("open"));

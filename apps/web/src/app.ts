@@ -86,7 +86,7 @@ export async function buildApp() {
   // serve the HTML itself as no-cache. The HTML is always fresh and cheap; the
   // assets are immutable per version and can be cached hard. A deploy changes the
   // hash, so every client picks up the whole new set atomically.
-  const VERSIONED_ASSETS = ["app.js", "app.css", "glossary.js", "login.js", "onboard.js", "reset.js"];
+  const VERSIONED_ASSETS = ["app.js", "app.css", "appearance.js", "glossary.js", "login.js", "onboard.js", "reset.js"];
   const HTML_PAGES = ["index.html", "login.html", "onboard.html", "reset.html"];
 
   // Hash names and raw bytes in a plain loop. Buffers go in as Buffers (no utf8

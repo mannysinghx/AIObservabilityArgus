@@ -5,14 +5,22 @@
  *   100 #eef6ff · 200 #d6ebff · 300 #b5d9fd · 400 #94bce3 · 500 #749dc4
  *   600 #597ea3 · 700 #416180 · 800 #2c455d · 900 #1d2d3d
  *
- * SEVERITY IS TONAL, NOT HUED. ThreatClaw collapsed critical/high/medium onto
- * that one ramp — severity reads by weight (darkest = worst), not by colour.
- * This reverses a rule previously written into this file, that severity hues are
- * fixed so an alert always reads the same, and it is a real trade-off: hue is
- * faster to scan than tone. It is adopted because it is the defining feature of
- * the ThreatClaw look and because ThreatClaw made the same call in the same
- * problem domain. Restoring hues is a matter of editing the four --sev-* values
- * here and in the dark block; nothing else depends on them being tonal.
+ * STEEL CHROME, SEMANTIC SEVERITY. ThreatClaw collapses severity onto that one
+ * steel ramp so it reads by tonal weight. Argus briefly did the same and it was
+ * the wrong call here: this is a triage surface, and the whole job of the Threat
+ * Center is answering "what do I look at first" in one glance. Tone is too slow
+ * for that — red carries urgency pre-attentively in a way that a darker blue
+ * does not.
+ *
+ * So the ground, borders, accent and geometry stay ThreatClaw's, and severity
+ * gets its hues back: critical red, high orange, medium amber, low steel, ok
+ * green. Low deliberately stays on the steel accent so the quiet end of the
+ * scale still belongs to the palette and only the things worth looking at
+ * carry colour.
+ *
+ * These are tuned against the steel ground, not inherited from the old teal
+ * theme — the light values are darkened for contrast on #F2F2F3 and the dark
+ * ones brightened for #10171F.
  */
   :root {
     --bg: #F2F2F3;
@@ -27,16 +35,18 @@
     --accent-soft: rgba(89,128,166,.12);
     --accent-ink: #FFFFFF;
 
-    /* darkest = most severe */
-    --sev-critical: #1D2D3D;
-    --sev-high: #2C455D;
-    --sev-medium: #416180;
-    --sev-low: #5980A6;
-    --ok: #416180;
+    --sev-critical: #C62130;
+    --sev-high: #C25A00;
+    --sev-medium: #8A6D0B;
+    --sev-low: #5980A6;   /* steel — the quiet end stays in-palette */
+    --ok: #2E7D46;
 
-    --taint-wash: rgba(65,97,128,.10);
-    --taint-influenced: rgba(65,97,128,.05);
-    --canary-wash: rgba(29,45,61,.10);
+    /* Warm washes, matching --sev-high / --sev-critical: a tainted span in the
+       trace waterfall should read as "touched by something hostile" at a glance,
+       which a steel tint did not do. */
+    --taint-wash: rgba(194,90,0,.09);
+    --taint-influenced: rgba(194,90,0,.045);
+    --canary-wash: rgba(198,33,48,.10);
 
     --u: 5px;                 /* density unit */
     --fs: 13.5px;             /* base font size */
@@ -73,15 +83,16 @@
       --accent: #749DC4;
       --accent-soft: rgba(116,157,196,.16);
       --accent-ink: #0D141B;
-      /* lightest = most severe */
-      --sev-critical: #B5D9FD;
-      --sev-high: #94BCE3;
-      --sev-medium: #749DC4;
-      --sev-low: #597EA3;
-      --ok: #94BCE3;
-      --taint-wash: rgba(116,157,196,.12);
-      --taint-influenced: rgba(116,157,196,.06);
-      --canary-wash: rgba(181,217,253,.12);
+      /* Brightened for the dark steel ground — the light theme's values are too
+         dense to read at pill size on #10171F. */
+      --sev-critical: #FF6069;
+      --sev-high: #FF9245;
+      --sev-medium: #E3B341;
+      --sev-low: #7FA6C9;   /* steel — the quiet end stays in-palette */
+      --ok: #56D07E;
+      --taint-wash: rgba(255,146,69,.10);
+      --taint-influenced: rgba(255,146,69,.05);
+      --canary-wash: rgba(255,96,105,.12);
       --chart-grid: rgba(159,179,198,.14);
     }
   }
@@ -93,19 +104,19 @@
     --bg: #F2F2F3; --surface: #E9E9EA; --surface-2: #E2E2E4; --line: #D3D3D6;
     --ink: #1D1F20; --ink-muted: #5D5D60; --ink-faint: #98989B;
     --accent: #5980A6; --accent-soft: rgba(89,128,166,.12); --accent-ink: #FFFFFF;
-    --sev-critical: #1D2D3D; --sev-high: #2C455D; --sev-medium: #416180;
-    --sev-low: #5980A6; --ok: #416180;
-    --taint-wash: rgba(65,97,128,.10); --taint-influenced: rgba(65,97,128,.05);
-    --canary-wash: rgba(29,45,61,.10); --chart-grid: rgba(89,128,166,.16);
+    --sev-critical: #C62130; --sev-high: #C25A00; --sev-medium: #8A6D0B;
+    --sev-low: #5980A6; --ok: #2E7D46;
+    --taint-wash: rgba(194,90,0,.09); --taint-influenced: rgba(194,90,0,.045);
+    --canary-wash: rgba(198,33,48,.10); --chart-grid: rgba(89,128,166,.16);
   }
   :root[data-theme="dark"] {
     --bg: #10171F; --surface: #16202B; --surface-2: #1D2A36; --line: #2C3F52;
     --ink: #E8EEF4; --ink-muted: #9FB3C6; --ink-faint: #6D8298;
     --accent: #749DC4; --accent-soft: rgba(116,157,196,.16); --accent-ink: #0D141B;
-    --sev-critical: #B5D9FD; --sev-high: #94BCE3; --sev-medium: #749DC4;
-    --sev-low: #597EA3; --ok: #94BCE3;
-    --taint-wash: rgba(116,157,196,.12); --taint-influenced: rgba(116,157,196,.06);
-    --canary-wash: rgba(181,217,253,.12); --chart-grid: rgba(159,179,198,.14);
+    --sev-critical: #FF6069; --sev-high: #FF9245; --sev-medium: #E3B341;
+    --sev-low: #7FA6C9; --ok: #56D07E;
+    --taint-wash: rgba(255,146,69,.10); --taint-influenced: rgba(255,146,69,.05);
+    --canary-wash: rgba(255,96,105,.12); --chart-grid: rgba(159,179,198,.14);
   }
   /* Accent variants (tenant/user configurable). The default is now the steel
      accent from the Industry palette above, so the old teal survives here as an
@@ -310,17 +321,27 @@
   .feed tr:last-child td { border-bottom: none; }
   td.stripe { padding: 0; width: 3px; }
   .stripe i { display: block; width: 3px; height: 100%; min-height: 30px; }
-  .s-critical i { background: var(--sev-critical); }
+  .s-critical i { background: var(--sev-critical); width: 4px; }
   .s-high i { background: var(--sev-high); }
   .s-medium i { background: var(--sev-medium); }
   .s-low i { background: var(--sev-low); }
+  /* Critical rows carry a faint wash of their own severity colour on top of the
+     stripe and the pill. Three weak cues stacked beat one strong one: the row
+     you should open first is findable while scrolling a full feed, without
+     shouting so loudly that a screen of criticals becomes unreadable. Kept to
+     4% so it survives the :hover background rather than fighting it. */
+  .feed tr.s-critical td { background: color-mix(in srgb, var(--sev-critical) 4%, transparent); }
+  .feed tr.evt.s-critical:hover td { background: color-mix(in srgb, var(--sev-critical) 9%, var(--surface-2)); }
 
   .pill {
     display: inline-flex; align-items: center; gap: 5px;
     font-size: 10.5px; font-weight: 650; letter-spacing: .03em;
     border-radius: 99px; padding: 2px 9px; text-transform: uppercase;
   }
-  .pill-critical { color: var(--sev-critical); background: color-mix(in srgb, var(--sev-critical) 12%, transparent); }
+  /* Critical alone gets a border as well as a tint — at pill size a 12% wash of
+     red and a 12% wash of orange are easy to confuse in peripheral vision, and
+     this is the one distinction that must never be misread. */
+  .pill-critical { color: var(--sev-critical); background: color-mix(in srgb, var(--sev-critical) 14%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sev-critical) 40%, transparent); }
   .pill-high     { color: var(--sev-high);     background: color-mix(in srgb, var(--sev-high) 12%, transparent); }
   .pill-medium   { color: var(--sev-medium);   background: color-mix(in srgb, var(--sev-medium) 14%, transparent); }
   .pill-low      { color: var(--sev-low);      background: color-mix(in srgb, var(--sev-low) 15%, transparent); }

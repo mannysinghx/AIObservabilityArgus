@@ -78,36 +78,34 @@ most likely to be installed and falls back through the system stack.
 
 **Semantic severity ramp (fixed, never themed away):**
 
-> **Superseded — Argus now follows the ThreatClaw "Industry" system.** The
-> palette below was a hued ramp (red / orange / amber). Argus was re-skinned to
-> match threatclaw.ai, which deliberately collapses severity onto a single steel
-> ramp so it reads by **tonal weight, not hue**. The "fixed, never themed away"
-> rule still holds — severity never derives from the accent — but the values are
-> now tonal. See `apps/web/public/app.css`.
->
-> This is a real trade-off, recorded so nobody has to rediscover it: hue is
-> faster to scan than tone, which matters in a triage queue. It was accepted
-> because it is the defining feature of the ThreatClaw look and because
-> ThreatClaw made the same call in the same problem domain. Severity is always
-> spelled out in words beside the chip, so nothing depends on the colour alone
-> (which the accessibility rule below already required). Reverting is a matter
-> of editing the four `--sev-*` values in the two theme blocks.
+**Steel chrome, semantic severity.** Argus takes its ground, borders, accent and
+geometry from ThreatClaw's Industry system, but *not* its severity treatment.
+ThreatClaw collapses severity onto the steel ramp so it reads by tonal weight;
+Argus tried that and reverted, because this is a triage surface and the Threat
+Center's whole job is answering "what do I open first" in one glance. Tone is
+too slow for that — red carries urgency pre-attentively in a way a darker blue
+does not. Hue is the signal; steel is the frame.
 
-| Token | Light (on steel ground) | Dark (inverted) | Use |
+Values are tuned against the steel ground rather than inherited from the older
+teal theme: light darkened for contrast on `#F2F2F3`, dark brightened for
+`#10171F`. `--sev-low` deliberately stays on the steel accent, so the quiet end
+of the scale belongs to the palette and only things worth looking at carry
+colour.
+
+| Token | Light | Dark | Use |
 |---|---|---|---|
-| `--sev-critical` | `#1D2D3D` | `#B5D9FD` | critical events, blocked states |
-| `--sev-high` | `#2C455D` | `#94BCE3` | high |
-| `--sev-medium` | `#416180` | `#749DC4` | medium |
-| `--sev-low` | `#5980A6` | `#597EA3` | low |
+| `--sev-critical` | `#C62130` | `#FF6069` | critical events, blocked states |
+| `--sev-high` | `#C25A00` | `#FF9245` | high |
+| `--sev-medium` | `#8A6D0B` | `#E3B341` | medium |
+| `--sev-low` | `#5980A6` | `#7FA6C9` | low (steel — in-palette) |
 | `--sev-info` | `--ink-muted` | `--ink-muted` | info |
-| `--ok` | `#416180` | `#94BCE3` | healthy/pass |
+| `--ok` | `#2E7D46` | `#56D07E` | healthy/pass |
 
-Weight means "furthest from the page": darkest on a light ground, lightest on a
-dark one. Reusing the light values on dark would make critical the chip that
-disappears into the background.
-
-*Historical (pre-Industry) hued ramp, for reference:* critical `#E5484D`,
-high `#F76B15`, medium `#DFA30E`, low `#6E8CA8`, ok `#3BA55D`.
+**Critical gets three stacked cues**, because it is the one distinction that
+must never be misread and a 12% wash of red is easy to confuse with a 12% wash
+of orange in peripheral vision: a bordered pill, a 4px stripe (others get 3px),
+and a 4% row wash that survives `:hover`. Weak cues stacked beat one loud one —
+a screen full of criticals still has to stay readable.
 
 **Taint tinting (trace view):** untrusted spans get a `--sev-high`-hued left
 edge + 6–8% background wash; taint-*influenced* spans a fainter wash; canary

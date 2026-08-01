@@ -692,6 +692,7 @@
             <button class="toc-link" data-scroll="g-incidents">Incidents</button>
             <button class="toc-link" data-scroll="g-review">Review Queue</button>
             <button class="toc-link" data-scroll="g-canaries">Canaries</button>
+            <button class="toc-link" data-scroll="g-assess">Static assessment</button>
             <button class="toc-link" data-scroll="g-redteam">Red Team</button>
             <div class="toc-label">Observability pages</div>
             <button class="toc-link" data-scroll="g-ovpage">Overview page</button>
@@ -728,6 +729,7 @@
                 <li><b>Threat detection</b> — get alerted when a user or a piece of retrieved content tries to hijack your agent, exfiltrate data, or bypass your system prompt.</li>
                 <li><b>Incident response</b> — when something goes wrong, open the trace, see the taint-tinted waterfall, and find the exact span and evidence that explains what happened.</li>
                 <li><b>Analyst triage</b> — work through the Review Queue, confirm or dismiss flagged events, and keep a clean record of what's a real attack versus noise.</li>
+                <li><b>Pre-deployment assessment</b> — scan your prompts and architecture for the weaknesses an attack would exploit, before you ship. See <button class="toc-link" style="display:inline;padding:0;color:var(--accent);text-decoration:underline" data-scroll="g-assess">Static assessment</button>.</li>
                 <li><b>Cost &amp; usage tracking</b> — see spend and token usage broken down by model, provider, and environment.</li>
                 <li><b>Compliance evidence</b> — because full, untruncated content is stored for every observation (not just previews), you have a complete audit trail to show what your AI system actually did.</li>
               </ul>
@@ -1057,6 +1059,57 @@
               <p>Revoking a canary stops Argus watching for it but keeps the record, so past incidents still resolve to a label instead of reading "canary &lt;deleted&gt; fired".</p>
               <p class="dim">Needs <b>member</b> to view, <b>admin</b> to plant or revoke.</p>
               <button class="btn btn-primary open-page" type="button" data-nav="canaries">Open Canaries →</button>
+            </article>
+
+            <article class="guide-sec" id="g-assess">
+              <h2>Static assessment</h2>
+              <p class="lede">Everything else on this platform watches your application <b>while it runs</b>. Static assessment asks a different question: is your application <b>built</b> safely in the first place? It reads your prompt templates and your architecture — before an attacker sends anything — and tells you which weaknesses an attack would exploit.</p>
+              <p>This is the half of the product that came from <b>InjectGuard</b>, a separate AI security assessment tool that was merged into Argus. The two halves answer questions you need both of: <i>"am I being attacked right now?"</i> (traces, Threat Center, canaries) and <i>"could I be attacked, and can I prove I fixed it?"</i> (this).</p>
+              <p><b>There is no page for this yet.</b> The engine and the API are live and storing results; the dashboard views land in the next release. Until then you drive it through the API below — everything you record now will appear in those views when they ship.</p>
+
+              <h3>What it looks for</h3>
+              <p>Twenty deterministic rules over your prompts, and seven over your architecture. Deterministic matters here: the same prompt always produces the same findings, so a result you fixed stays fixed, and nothing depends on a model's mood.</p>
+              <table class="field-table">
+                <tr><th>It flags</th><th>Because</th></tr>
+                <tr><td>Untrusted data mixed with instructions</td><td>A variable interpolated on the same line as a directive is the classic injection surface — the model can't tell your instruction from the user's.</td></tr>
+                <tr><td>Secrets in prompts</td><td>An API key in a system prompt is one prompt-leak away from being an incident. Inject them server-side at call time instead.</td></tr>
+                <tr><td>Model-controlled authorization</td><td>Telling the model to "decide whether the user may see this" makes your access control an argument the attacker gets to have.</td></tr>
+                <tr><td>Direct execution of model output</td><td>Output routed to a shell, SQL, or <code>eval</code>. Rated critical, always.</td></tr>
+                <tr><td>Write-capable tools with no approval step</td><td>An agent that can delete, send, or pay without a human gate turns a successful injection into a real-world action.</td></tr>
+                <tr><td>Retrieved content treated as instructions</td><td>The precondition for indirect prompt injection — the attack Argus's runtime side exists to catch.</td></tr>
+              </table>
+              <p>Architecture rules work on topology rather than wording: untrusted sources feeding trusted components, model output reaching an interpreter, data crossing a tenant boundary, retrieval without provenance.</p>
+
+              <h3>Every finding comes with three things</h3>
+              <table class="field-table">
+                <tr><th>Part</th><th>What it gives you</th></tr>
+                <tr><td><b>A transparent risk score</b></td><td>0–100 from five factors — likelihood, impact, exposure, control weakness, confidence — with the weights and a written rationale attached. You can always answer "why is this a 78?", and rescoring the same inputs always returns the same number.</td></tr>
+                <tr><td><b>Ranked mitigations</b></td><td>Not generic advice. The catalog is scored against <i>your</i> facts, so a public app with write-capable tools gets human-approval gates ranked above documentation fixes. Each carries implementation guidance and a way to validate the fix.</td></tr>
+                <tr><td><b>Framework references</b></td><td>OWASP LLM Top 10, MITRE ATLAS, NIST AI RMF. This is what makes a finding usable in an audit conversation rather than only an engineering one.</td></tr>
+              </table>
+
+              <h3>Running one</h3>
+              <div class="code-block"><code>curl -X POST https://your-argus/api/assess/prompt \
+  -H "content-type: application/json" -b "argus_session=…" \
+  -d '{"project":"&lt;project-id&gt;",
+       "documents":[{"kind":"system","name":"main","content":"…your prompt…"}],
+       "context":{"is_public":true,"has_write_capable_tools":true}}'</code></div>
+              <p>The <code>context</code> object is how the assessment learns about your app. It changes real outcomes: declaring write-capable tools without approval fires a rule that prompt text alone would never reveal, and a public app scores higher on exposure. Fill it in honestly — an assessment against optimistic facts is a reassuring number about an app that doesn't exist.</p>
+              <table class="field-table">
+                <tr><th>Endpoint</th><th>What it does</th></tr>
+                <tr><td><code>POST /api/assess/prompt</code></td><td>Run an assessment over one or more prompt documents. Stores the run and its findings.</td></tr>
+                <tr><td><code>GET /api/assessments</code></td><td>Every run for the application, newest first.</td></tr>
+                <tr><td><code>GET /api/assessment/:id</code></td><td>One run in full, with all of its findings.</td></tr>
+                <tr><td><code>GET /api/assessment-findings</code></td><td>Findings across all runs — the raw material for the Findings view when it ships.</td></tr>
+                <tr><td><code>POST /api/assessment/graph</code></td><td>Save your architecture graph (nodes and edges). One per application; saving replaces it.</td></tr>
+                <tr><td><code>POST /api/assessment/graph/analyze</code></td><td>Analyze the saved graph and record the insights as a run.</td></tr>
+                <tr><td><code>POST /api/assessment/finding/status</code></td><td>Mark a finding <code>open</code>, <code>resolved</code>, or <code>accepted</code> — the same triage flow as a security event's verdict.</td></tr>
+              </table>
+
+              <h3>What Argus stores, and what it refuses to</h3>
+              <p><b>Your prompt text is never stored.</b> Argus keeps the document's name and kind, the context facts you supplied, and a short evidence excerpt per finding with secrets already redacted out of it. Prompts are your intellectual property and they routinely contain the exact credentials the scanner is flagging — keeping them would make this platform the disclosure it's meant to prevent.</p>
+              <p>Findings keep their full risk breakdown and mitigation ranking as recorded, so a score you saw six months ago still explains itself even after the scoring model changes. Each row carries the version it was computed with.</p>
+              <p class="dim">Needs <b>member</b> to view and to run. If you get <i>"assessment engine unavailable"</i>, the detection service is unreachable — that's an operational fault, not a problem with your prompt.</p>
             </article>
 
             <article class="guide-sec" id="g-redteam">

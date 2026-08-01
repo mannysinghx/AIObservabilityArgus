@@ -180,10 +180,11 @@ apps/ingest         TS ingestion API — OTLP/HTTP JSON + native/Langfuse batch
 apps/worker         TS trace worker (→ ClickHouse) + security worker (→ detection)
 apps/web            TS dashboard — Threat Center, Traces, trace waterfall, Analytics
 services/detection  Python detection pipeline (L1–L4) + corpus + quality gate
+                    └ assessment/  static assessment engine (see docs/14)
 packages/shared     TS types, config, ClickHouse/Redis clients, GenAI mapping
 deploy/             docker-compose + ClickHouse/Postgres migrations
 demo/               end-to-end poisoned-trace demo
-docs/               design docs 01–08 (vision, architecture, detection, UI spec…)
+docs/               design docs 01–14 (vision, architecture, detection, UI spec…)
 ```
 
 ## Project status
@@ -228,6 +229,7 @@ See [docs/06-roadmap.md](docs/06-roadmap.md) for the full plan.
 | [11 — Public API](docs/11-public-api.md) | The `/v1` read API: auth, scopes, pagination, filters, errors |
 | [12 — Gateway](docs/12-gateway.md) | Inline blocking proxy: setup, policy, and where the block threshold comes from |
 | [13 — Feature Reference](docs/13-feature-reference.md) | **Every feature, where to find it in the UI, and what it requires** |
+| [14 — Merged Features (InjectGuard)](docs/14-merged-features.md) | **The static-assessment half: what merged in, where each piece lives, what didn't, and what's next** |
 | [RUNBOOK.md](RUNBOOK.md) | How to run the stack locally and reproduce the demo |
 
 ## Built on

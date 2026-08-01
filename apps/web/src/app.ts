@@ -16,6 +16,7 @@ import * as Canaries from "./canaryAdmin.js";
 import * as Governance from "./dataGovernance.js";
 import { registerPublicApi } from "./publicRoutes.js";
 import * as Alerts from "./alertAdmin.js";
+import * as Assessments from "./assessments.js";
 import { applySecurityHeaders } from "./headers.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -724,6 +725,105 @@ export async function buildApp() {
       reply.code(500).send({ error: String(err) });
     }
   });
+
+  // ---------------- static assessments (view: member+, run/edit: member+) ----------------
+  // Phase 2 of the InjectGuard merge. The engines are pure functions in the
+  // detection service; these routes own tenancy and storage. Reads go through
+  // guard() like every other data view; writes verify access and then pass the
+  // project into the module, whose queries key on it directly.
+
+  guard("assessments", (_r, p) => Assessments.listAssessments(p).then((assessments) => ({ assessments })));
+  guard("assessment-findings", (_r, p) => Assessments.listFindings(p).then((findings) => ({ findings })));
+  guard("assessment-graph", (_r, p) => Assessments.getGraph(p));
+
+  app.get<{ Params: { id: string }; Querystring: ScopedQuery }>("/api/assessment/:id", async (req, reply) => {
+    const user = userOf(req)!;
+    const project = req.query.project;
+    if (!project || (!user.isPlatformAdmin && !(await Auth.userCanAccessProject(user.id, project)))) { reply.code(403).send({ error: "forbidden" }); return; }
+    try {
+      const a = await Assessments.getAssessment(project, req.params.id);
+      if (!a) { reply.code(404).send({ error: "assessment not found" }); return; }
+      return a;
+    } catch (err) { app.log.error({ err }, "assessment detail failed"); reply.code(503).send({ error: String(err) }); }
+  });
+
+  app.post<{ Body: { project?: string; documents?: Assessments.PromptDocIn[]; context?: Assessments.AssessContextIn } }>(
+    "/api/assess/prompt",
+    async (req, reply) => {
+      const g = await roleGate(req, reply, req.body?.project, "member");
+      if (!g) return;
+      const invalid = Assessments.validateDocuments(req.body?.documents);
+      if (invalid) { reply.code(400).send({ error: invalid }); return; }
+      try {
+        const r = await Assessments.runPromptAssessment(
+          req.body!.project!, req.body!.documents!, req.body?.context ?? {}, userOf(req)!.id,
+        );
+        if (!r) { reply.code(400).send({ error: "invalid project" }); return; }
+        audit(req, "assessment.run", {
+          orgId: g.orgId, targetType: "assessment", target: r.id,
+          metadata: { project: req.body?.project, kind: "prompt", findings: r.findingCount, maxSeverity: r.maxSeverity },
+        });
+        return r;
+      } catch (err) {
+        // The engine being down is an operational condition, not a caller error.
+        app.log.error({ err }, "assess prompt failed");
+        reply.code(503).send({ error: "assessment engine unavailable" });
+      }
+    },
+  );
+
+  app.post<{ Body: { project?: string; nodes?: Assessments.GraphNodeIn[]; edges?: Assessments.GraphEdgeIn[] } }>(
+    "/api/assessment/graph",
+    async (req, reply) => {
+      const g = await roleGate(req, reply, req.body?.project, "member");
+      if (!g) return;
+      const invalid = Assessments.validateGraph(req.body?.nodes, req.body?.edges);
+      if (invalid) { reply.code(400).send({ error: invalid }); return; }
+      try {
+        const ok = await Assessments.saveGraph(req.body!.project!, req.body!.nodes!, req.body?.edges ?? [], userOf(req)!.id);
+        if (!ok) { reply.code(400).send({ error: "invalid project" }); return; }
+        audit(req, "assessment.graph_saved", {
+          orgId: g.orgId, targetType: "assessment_graph", target: req.body!.project!,
+          metadata: { project: req.body?.project, nodes: req.body!.nodes!.length, edges: (req.body?.edges ?? []).length },
+        });
+        return { ok: true };
+      } catch (err) { app.log.error({ err }, "graph save failed"); reply.code(500).send({ error: String(err) }); }
+    },
+  );
+
+  app.post<{ Body: { project?: string } }>("/api/assessment/graph/analyze", async (req, reply) => {
+    const g = await roleGate(req, reply, req.body?.project, "member");
+    if (!g) return;
+    try {
+      const r = await Assessments.runGraphAssessment(req.body!.project!, userOf(req)!.id);
+      if (!r) { reply.code(400).send({ error: "no graph saved for this project" }); return; }
+      audit(req, "assessment.run", {
+        orgId: g.orgId, targetType: "assessment", target: r.id,
+        metadata: { project: req.body?.project, kind: "graph", findings: r.findingCount, maxSeverity: r.maxSeverity },
+      });
+      return r;
+    } catch (err) { app.log.error({ err }, "assess graph failed"); reply.code(503).send({ error: "assessment engine unavailable" }); }
+  });
+
+  // Analyst action, mirroring /api/verdict: scoped by (id AND project).
+  app.post<{ Body: { project?: string; findingId?: string; status?: string } }>(
+    "/api/assessment/finding/status",
+    async (req, reply) => {
+      const g = await roleGate(req, reply, req.body?.project, "member");
+      if (!g) return;
+      const { findingId, status } = req.body || {};
+      if (!findingId || !status) { reply.code(400).send({ error: "findingId and status required" }); return; }
+      try {
+        const r = await Assessments.setFindingStatus(req.body!.project!, findingId, status);
+        if ("error" in r) { reply.code(r.error === "finding not found" ? 404 : 400).send(r); return; }
+        audit(req, "assessment.finding_status", {
+          orgId: g.orgId, targetType: "assessment_finding", target: findingId,
+          metadata: { project: req.body?.project, status },
+        });
+        return r;
+      } catch (err) { app.log.error({ err }, "finding status failed"); reply.code(500).send({ error: String(err) }); }
+    },
+  );
 
   // ---------------- platform admin (super-admin) ----------------
   // Every route here requires the platform-admin flag. This is the operator layer

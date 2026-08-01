@@ -161,6 +161,22 @@ later run in the worker or gateway unchanged. `/health` reports
 `assessment.prompt_rules` and `assessment.scoring_version` for deploy
 verification.
 
+**Phase 2 — tenanted storage and dashboard API.** Assessments now persist:
+`POST /api/assess/prompt` (member+) runs the engine and records the run and its
+findings under the caller's project; `GET /api/assessments`,
+`/api/assessment/:id`, `/api/assessment-findings` read them back through the
+same project guard as every other data view; `PUT`-style
+`POST /api/assessment/graph` stores one architecture graph per project and
+`POST /api/assessment/graph/analyze` runs the analyzer over it;
+`POST /api/assessment/finding/status` records the analyst's disposition
+(open/resolved/accepted), scoped by (id AND project) like `/api/verdict`.
+Prompt *contents* are never stored — the assessment keeps document names,
+context facts, and the engine's already-redacted evidence excerpts (Postgres
+migration `013_assessments.sql` explains the reduction from InjectGuard's
+schema). The web service now needs `DETECTION_URL` (+ `DETECTION_API_KEY`)
+set, same as the worker. Isolation coverage:
+`tests/integration/assessments.test.ts`.
+
 ---
 
 ## Data governance

@@ -875,8 +875,12 @@ const assessInput = "font:inherit;font-size:12.5px;padding:7px 10px;border:1px s
  * "this could be exploited" and "someone is trying this", and it is the whole
  * argument for running observability and assessment in one product.
  */
+// Outlined rather than a severity pill. It used to borrow `pill-critical`,
+// which worked while critical was red — under the steel palette it became the
+// same pale blue as the severity chip beside it, so a finding showed two
+// identical badges saying different things.
 const assessObservedTag = () =>
-  `<span class="pill pill-critical" title="This attack class has been recorded against this application in production, so its likelihood is scored at maximum.">seen in production</span>`;
+  `<span class="pill" style="color:var(--accent);background:transparent;border:1px solid var(--accent)" title="This attack class has been recorded against this application in production, so its likelihood is scored at maximum.">seen in production</span>`;
 
 async function loadAssess() {
   if (!PROJECT) { banner("Open an application from Applications to assess it."); return; }

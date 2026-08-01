@@ -45,32 +45,69 @@ primitive tokens   →  semantic tokens        →  component tokens
 
 ### 2.2 Color
 
-**Neutrals (blue-biased, deliberately not pure grey):**
+**Neutrals — the ThreatClaw "Industry" steel ground.** Matched to
+threatclaw.ai's own `--tc-*` tokens so the two products read as one family. The
+light values are ThreatClaw's exactly; dark is Argus's extension of the same
+ramp, since ThreatClaw ships only the light ground.
 
 | Token | Light | Dark |
 |---|---|---|
-| `--bg` | `#F6F7F9` | `#0D131D` |
-| `--surface` | `#FFFFFF` | `#141C2A` |
-| `--surface-2` (nested) | `#F0F2F5` | `#1B2534` |
-| `--line` | `#E2E6EB` | `#263248` |
-| `--ink` | `#1B2534` | `#E8EDF4` |
-| `--ink-muted` | `#5C6B80` | `#8DA0B8` |
+| `--bg` | `#F2F2F3` | `#10171F` |
+| `--surface` | `#E9E9EA` | `#16202B` |
+| `--surface-2` (nested) | `#E2E2E4` | `#1D2A36` |
+| `--line` | `#D3D3D6` | `#2C3F52` |
+| `--ink` | `#1D1F20` | `#E8EEF4` |
+| `--ink-muted` | `#5D5D60` | `#9FB3C6` |
+
+**Steel accent ramp** (the whole system derives from it):
+`100 #EEF6FF · 200 #D6EBFF · 300 #B5D9FD · 400 #94BCE3 · 500 #749DC4 ·
+600 #597EA3 · 700 #416180 · 800 #2C455D · 900 #1D2D3D`
 
 **Brand accent (interaction, selection, links, primary buttons):**
-`--accent: #35B5A4` (radar teal), `--accent-ink` for on-accent text.
-Tenant-overridable; the UI must remain coherent under any accent because
-severity color never derives from accent.
+`--accent: #5980A6` light / `#749DC4` dark (steel), `--accent-ink` for on-accent
+text. Tenant-overridable; the UI must remain coherent under any accent because
+severity never derives from accent.
+
+**Geometry:** `--radius: 3px` — near-rectangular, matching ThreatClaw's
+surfaces. Still user-overridable in Appearance (0 / 3 / 10).
+
+**Type:** ThreatClaw uses Barlow / Barlow Condensed. Argus's CSP is
+`font-src 'self' data:` with no CDN, and self-hosting a family for one visual
+match isn't worth the payload, so `--font-ui` leads with the narrow grotesks
+most likely to be installed and falls back through the system stack.
 
 **Semantic severity ramp (fixed, never themed away):**
 
-| Token | Value | Use |
-|---|---|---|
-| `--sev-critical` | `#E5484D` | critical events, blocked states |
-| `--sev-high` | `#F76B15` | high |
-| `--sev-medium` | `#DFA30E` | medium |
-| `--sev-low` | `#6E8CA8` | low |
-| `--sev-info` | `--ink-muted` | info |
-| `--ok` | `#3BA55D` | healthy/pass |
+> **Superseded — Argus now follows the ThreatClaw "Industry" system.** The
+> palette below was a hued ramp (red / orange / amber). Argus was re-skinned to
+> match threatclaw.ai, which deliberately collapses severity onto a single steel
+> ramp so it reads by **tonal weight, not hue**. The "fixed, never themed away"
+> rule still holds — severity never derives from the accent — but the values are
+> now tonal. See `apps/web/public/app.css`.
+>
+> This is a real trade-off, recorded so nobody has to rediscover it: hue is
+> faster to scan than tone, which matters in a triage queue. It was accepted
+> because it is the defining feature of the ThreatClaw look and because
+> ThreatClaw made the same call in the same problem domain. Severity is always
+> spelled out in words beside the chip, so nothing depends on the colour alone
+> (which the accessibility rule below already required). Reverting is a matter
+> of editing the four `--sev-*` values in the two theme blocks.
+
+| Token | Light (on steel ground) | Dark (inverted) | Use |
+|---|---|---|---|
+| `--sev-critical` | `#1D2D3D` | `#B5D9FD` | critical events, blocked states |
+| `--sev-high` | `#2C455D` | `#94BCE3` | high |
+| `--sev-medium` | `#416180` | `#749DC4` | medium |
+| `--sev-low` | `#5980A6` | `#597EA3` | low |
+| `--sev-info` | `--ink-muted` | `--ink-muted` | info |
+| `--ok` | `#416180` | `#94BCE3` | healthy/pass |
+
+Weight means "furthest from the page": darkest on a light ground, lightest on a
+dark one. Reusing the light values on dark would make critical the chip that
+disappears into the background.
+
+*Historical (pre-Industry) hued ramp, for reference:* critical `#E5484D`,
+high `#F76B15`, medium `#DFA30E`, low `#6E8CA8`, ok `#3BA55D`.
 
 **Taint tinting (trace view):** untrusted spans get a `--sev-high`-hued left
 edge + 6–8% background wash; taint-*influenced* spans a fainter wash; canary

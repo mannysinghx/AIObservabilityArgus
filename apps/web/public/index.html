@@ -713,12 +713,12 @@
           <div class="card">
             <div class="set-row"><div class="set-name">Theme</div><div class="set-desc">Follows your OS by default.</div>
               <div class="seg" data-set="theme"><button type="button" data-val="system" class="on">System</button><button type="button" data-val="light">Light</button><button type="button" data-val="dark">Dark</button></div></div>
-            <div class="set-row"><div class="set-name">Accent</div><div class="set-desc">Interaction color only — severity colors are fixed so alerts always read the same.</div>
+            <div class="set-row"><div class="set-name">Accent</div><div class="set-desc">Interaction color only — severity is fixed so alerts always read the same, whichever accent you pick.</div>
               <div class="swatches" data-set="accent">
-                <button class="swatch on" type="button" data-val="" data-name="Radar" style="background:#35B5A4"></button>
+                <button class="swatch on" type="button" data-val="" data-name="Steel" style="background:#5980A6"></button>
+                <button class="swatch" type="button" data-val="radar" data-name="Radar" style="background:#35B5A4"></button>
                 <button class="swatch" type="button" data-val="indigo" data-name="Indigo" style="background:#5B6EE8"></button>
                 <button class="swatch" type="button" data-val="ember" data-name="Ember" style="background:#D26A3F"></button>
-                <button class="swatch" type="button" data-val="steel" data-name="Steel" style="background:#5C7C9E"></button>
               </div></div>
             <div class="set-row"><div class="set-name">Text size</div><div class="set-desc">Scales the whole interface, not just the type, so nothing gets cramped. Applies instantly and is remembered on this device.</div>
               <div class="seg" data-set="fontsize"><button type="button" data-val="s">Small</button><button type="button" data-val="" class="on">Default</button><button type="button" data-val="l">Large</button><button type="button" data-val="xl">Extra large</button></div></div>
@@ -1364,7 +1364,8 @@
               <table class="field-table">
                 <tr><th>Control</th><th>Options &amp; effect</th></tr>
                 <tr><td>Theme</td><td><b>System</b> (follows your OS light/dark setting, the default), <b>Light</b>, or <b>Dark</b> — forces a specific theme regardless of your OS.</td></tr>
-                <tr><td>Accent</td><td>Four color choices (Radar teal, Indigo, Ember, Steel) for interactive elements — links, buttons, highlights. This is purely cosmetic: <b>severity colors are always fixed</b> (critical is always red-ish, high is always orange), so an alert reads the same no matter your accent choice.</td></tr>
+                <tr><td>Accent</td><td>Four color choices for interactive elements — links, buttons, highlights. Purely cosmetic: <b>severity is fixed</b> and never follows your accent, so an alert reads the same whichever you pick.</td></tr>
+                <tr><td>How severity reads</td><td>Argus uses the ThreatClaw “Industry” palette, where severity is shown by <b>tonal weight rather than colour</b> — on the light theme critical is the darkest steel and drops to the lightest for low; on dark it inverts, since weight there means standing furthest out from the background. It's a quieter, more uniform look than red/amber/green, at the cost of being a little slower to scan by colour alone. Severity is always spelled out in words next to the chip.</td></tr>
                 <tr><td>Text size</td><td><b>Small</b>, <b>Default</b>, <b>Large</b> or <b>Extra large</b>. This scales the entire interface, not just the type — spacing, controls and tables grow with it — so larger text doesn't end up crammed into the same layout. Works alongside Density: text size sets how big things are, density sets how tightly they're packed.</td></tr>
                 <tr><td>Density</td><td><b>Comfortable</b> (default) or <b>Compact</b>, which tightens spacing to fit roughly 30% more rows on screen — useful when triaging a long attack feed.</td></tr>
                 <tr><td>Corner radius</td><td><b>0</b> (square, terminal-like), <b>6</b> (default), or <b>10</b> (soft) — controls the roundedness of cards, buttons, and pills throughout the app.</td></tr>

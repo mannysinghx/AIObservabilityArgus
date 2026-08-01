@@ -1,73 +1,120 @@
-/* ---------- tokens: light (default) ---------- */
+/* ---------- tokens: light (default) — the ThreatClaw "Industry" system --------
+ *
+ * Matched to threatclaw.ai's own --tc-* tokens so the two products read as one
+ * family: a light steel ground, thin borders, and a single steel accent ramp
+ *   100 #eef6ff · 200 #d6ebff · 300 #b5d9fd · 400 #94bce3 · 500 #749dc4
+ *   600 #597ea3 · 700 #416180 · 800 #2c455d · 900 #1d2d3d
+ *
+ * SEVERITY IS TONAL, NOT HUED. ThreatClaw collapsed critical/high/medium onto
+ * that one ramp — severity reads by weight (darkest = worst), not by colour.
+ * This reverses a rule previously written into this file, that severity hues are
+ * fixed so an alert always reads the same, and it is a real trade-off: hue is
+ * faster to scan than tone. It is adopted because it is the defining feature of
+ * the ThreatClaw look and because ThreatClaw made the same call in the same
+ * problem domain. Restoring hues is a matter of editing the four --sev-* values
+ * here and in the dark block; nothing else depends on them being tonal.
+ */
   :root {
-    --bg: #F6F7F9;
-    --surface: #FFFFFF;
-    --surface-2: #F0F2F5;
-    --line: #E2E6EB;
-    --ink: #1B2534;
-    --ink-muted: #5C6B80;
-    --ink-faint: #8B99AC;
+    --bg: #F2F2F3;
+    --surface: #E9E9EA;
+    --surface-2: #E2E2E4;
+    --line: #D3D3D6;
+    --ink: #1D1F20;
+    --ink-muted: #5D5D60;
+    --ink-faint: #98989B;
 
-    --accent: #2E9E8F;
-    --accent-soft: rgba(46,158,143,.12);
+    --accent: #5980A6;
+    --accent-soft: rgba(89,128,166,.12);
     --accent-ink: #FFFFFF;
 
-    --sev-critical: #E5484D;
-    --sev-high: #F76B15;
-    --sev-medium: #C98F0A;
-    --sev-low: #6E8CA8;
-    --ok: #3BA55D;
+    /* darkest = most severe */
+    --sev-critical: #1D2D3D;
+    --sev-high: #2C455D;
+    --sev-medium: #416180;
+    --sev-low: #5980A6;
+    --ok: #416180;
 
-    --taint-wash: rgba(247,107,21,.07);
-    --taint-influenced: rgba(247,107,21,.035);
-    --canary-wash: rgba(229,72,77,.08);
+    --taint-wash: rgba(65,97,128,.10);
+    --taint-influenced: rgba(65,97,128,.05);
+    --canary-wash: rgba(29,45,61,.10);
 
     --u: 5px;                 /* density unit */
     --fs: 13.5px;             /* base font size */
-    --radius: 6px;
-    --font-ui: "Avenir Next", "Segoe UI", system-ui, sans-serif;
-    --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace;
-    --chart-grid: rgba(92,107,128,.14);
+    /* Squared off. The ThreatClaw surfaces are near-rectangular; the softer
+       6px this used to default to is the single change that most made the two
+       products look unrelated. Still overridable in Appearance. */
+    --radius: 3px;
+    /* Barlow is the ThreatClaw face, but `font-src 'self' data:` means no CDN
+       and self-hosting a family for one visual match is not worth the payload.
+       This stack leads with the slightly-narrow grotesks most likely to be
+       present, which carries the same tone. */
+    --font-ui: "Barlow", "Roboto Condensed", "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
+    --font-mono: ui-monospace, "JetBrains Mono", "SF Mono", "Cascadia Code", Menlo, monospace;
+    --chart-grid: rgba(89,128,166,.16);
   }
+  /* Dark is Argus's own extension of the system — threatclaw.ai ships only the
+   * light Industry ground, so this continues the same steel ramp downward past
+   * 900 rather than inventing a second palette.
+   *
+   * Severity inverts here, and has to. Tonal weight means "furthest from the
+   * page"; on a light ground that is the darkest steel, on a dark ground it is
+   * the lightest. Reusing the light values would make critical the item that
+   * disappears into the background. The range stops short of the body-text
+   * white so a severity chip never reads as ordinary text. */
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #0D131D;
-      --surface: #141C2A;
-      --surface-2: #1B2534;
-      --line: #263248;
-      --ink: #E8EDF4;
-      --ink-muted: #8DA0B8;
-      --ink-faint: #5F7089;
-      --accent: #35B5A4;
-      --accent-soft: rgba(53,181,164,.14);
-      --accent-ink: #08211D;
-      --sev-medium: #DFA30E;
-      --taint-wash: rgba(247,107,21,.09);
-      --taint-influenced: rgba(247,107,21,.045);
-      --canary-wash: rgba(229,72,77,.10);
-      --chart-grid: rgba(141,160,184,.12);
+      --bg: #10171F;
+      --surface: #16202B;
+      --surface-2: #1D2A36;
+      --line: #2C3F52;
+      --ink: #E8EEF4;
+      --ink-muted: #9FB3C6;
+      --ink-faint: #6D8298;
+      --accent: #749DC4;
+      --accent-soft: rgba(116,157,196,.16);
+      --accent-ink: #0D141B;
+      /* lightest = most severe */
+      --sev-critical: #B5D9FD;
+      --sev-high: #94BCE3;
+      --sev-medium: #749DC4;
+      --sev-low: #597EA3;
+      --ok: #94BCE3;
+      --taint-wash: rgba(116,157,196,.12);
+      --taint-influenced: rgba(116,157,196,.06);
+      --canary-wash: rgba(181,217,253,.12);
+      --chart-grid: rgba(159,179,198,.14);
     }
   }
+  /* The explicit picks. These must mirror the two blocks above exactly — they
+     are what "Light"/"Dark" in Appearance select, and any value missing here
+     silently falls back to the light defaults, which is how a half-updated
+     palette ships looking fine until someone forces dark. */
   :root[data-theme="light"] {
-    --bg: #F6F7F9; --surface: #FFFFFF; --surface-2: #F0F2F5; --line: #E2E6EB;
-    --ink: #1B2534; --ink-muted: #5C6B80; --ink-faint: #8B99AC;
-    --accent: #2E9E8F; --accent-soft: rgba(46,158,143,.12); --accent-ink: #FFFFFF;
-    --sev-medium: #C98F0A;
-    --taint-wash: rgba(247,107,21,.07); --taint-influenced: rgba(247,107,21,.035);
-    --canary-wash: rgba(229,72,77,.08); --chart-grid: rgba(92,107,128,.14);
+    --bg: #F2F2F3; --surface: #E9E9EA; --surface-2: #E2E2E4; --line: #D3D3D6;
+    --ink: #1D1F20; --ink-muted: #5D5D60; --ink-faint: #98989B;
+    --accent: #5980A6; --accent-soft: rgba(89,128,166,.12); --accent-ink: #FFFFFF;
+    --sev-critical: #1D2D3D; --sev-high: #2C455D; --sev-medium: #416180;
+    --sev-low: #5980A6; --ok: #416180;
+    --taint-wash: rgba(65,97,128,.10); --taint-influenced: rgba(65,97,128,.05);
+    --canary-wash: rgba(29,45,61,.10); --chart-grid: rgba(89,128,166,.16);
   }
   :root[data-theme="dark"] {
-    --bg: #0D131D; --surface: #141C2A; --surface-2: #1B2534; --line: #263248;
-    --ink: #E8EDF4; --ink-muted: #8DA0B8; --ink-faint: #5F7089;
-    --accent: #35B5A4; --accent-soft: rgba(53,181,164,.14); --accent-ink: #08211D;
-    --sev-medium: #DFA30E;
-    --taint-wash: rgba(247,107,21,.09); --taint-influenced: rgba(247,107,21,.045);
-    --canary-wash: rgba(229,72,77,.10); --chart-grid: rgba(141,160,184,.12);
+    --bg: #10171F; --surface: #16202B; --surface-2: #1D2A36; --line: #2C3F52;
+    --ink: #E8EEF4; --ink-muted: #9FB3C6; --ink-faint: #6D8298;
+    --accent: #749DC4; --accent-soft: rgba(116,157,196,.16); --accent-ink: #0D141B;
+    --sev-critical: #B5D9FD; --sev-high: #94BCE3; --sev-medium: #749DC4;
+    --sev-low: #597EA3; --ok: #94BCE3;
+    --taint-wash: rgba(116,157,196,.12); --taint-influenced: rgba(116,157,196,.06);
+    --canary-wash: rgba(181,217,253,.12); --chart-grid: rgba(159,179,198,.14);
   }
-  /* accent variants (tenant/user configurable) */
+  /* Accent variants (tenant/user configurable). The default is now the steel
+     accent from the Industry palette above, so the old teal survives here as an
+     option rather than being deleted — some deployments will have got used to
+     it, and it costs one line to keep. */
+  :root[data-accent="radar"]   { --accent: #35B5A4; --accent-soft: rgba(53,181,164,.14); --accent-ink:#08211D; }
   :root[data-accent="indigo"]  { --accent: #5B6EE8; --accent-soft: rgba(91,110,232,.13); --accent-ink:#FFFFFF; }
   :root[data-accent="ember"]   { --accent: #D26A3F; --accent-soft: rgba(210,106,63,.13); --accent-ink:#FFFFFF; }
-  :root[data-accent="steel"]   { --accent: #5C7C9E; --accent-soft: rgba(92,124,158,.14); --accent-ink:#FFFFFF; }
+  :root[data-accent="steel"]   { --accent: #5980A6; --accent-soft: rgba(89,128,166,.14); --accent-ink:#FFFFFF; }
   :root[data-theme="dark"][data-accent="indigo"], :root[data-accent="indigo"]  { }
   /* density */
   :root[data-density="compact"] { --u: 4px; --fs: 12.5px; }

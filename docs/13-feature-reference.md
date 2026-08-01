@@ -196,8 +196,20 @@ control. Severity pills render from each finding's `argus_severity` (the runtime
 spelling) rather than the native label, because the engine's lowest band is
 `informational` and no such pill style exists.
 
+**Phase 4 — synthesis.** The two halves now feed each other.
+**Suggest from traces** (Architecture tab) proposes a graph from the spans Argus
+has recorded — components, trust levels, and how they call each other — as a
+proposal you review and save, never a silent overwrite; it deliberately won't
+infer whether a write is human-approved, because no trace shows that and it's
+the flag the most serious rules turn on. And any finding whose attack class has
+actually been recorded against the application in the last 30 days is badged
+**seen in production**, scored at maximum likelihood with the rationale saying
+so, and sorted to the top of the Findings view. Only likelihood moves — evidence
+of attempts says nothing about impact or exposure.
+
 Not yet ported from InjectGuard: policy *storage* (the evaluator is merged and
-callable), controls, and report generation.
+callable), controls, and report generation. Policy-driven gateway blocking waits
+on that storage.
 
 ---
 

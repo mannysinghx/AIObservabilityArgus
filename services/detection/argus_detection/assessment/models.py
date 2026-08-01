@@ -31,6 +31,13 @@ class AssessContext(BaseModel):
     has_compensating_controls: bool = False
     has_sensitive_data: bool = False
     business_criticality: str = "medium"  # critical|high|medium|low
+    # Phase-4 synthesis. Argus security-event categories this application has
+    # actually seen in production (runtime taxonomy spelling, e.g.
+    # "indirect_injection"). A finding whose argus_category appears here is a
+    # demonstrated exposure rather than a theoretical one, and its likelihood
+    # is scored accordingly. Supplied by the caller, which owns the telemetry —
+    # this service stays pure and never queries anything.
+    observed_categories: list[str] = Field(default_factory=list)
 
 
 class RiskBreakdown(BaseModel):
@@ -76,6 +83,9 @@ class AssessFinding(BaseModel):
     # Bridge into the runtime taxonomy (None = hygiene finding, no attack class).
     argus_category: str | None = None
     argus_severity: str
+    # True when this weakness's attack class has been observed against this
+    # application in production — the finding is demonstrated, not theoretical.
+    observed_in_production: bool = False
     risk: RiskBreakdown
     mitigations: list[MitigationRec] = Field(default_factory=list)
 

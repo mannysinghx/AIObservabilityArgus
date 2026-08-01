@@ -7,15 +7,17 @@ not come. If you are looking for a capability and can't find it in the UI, look
 here first — a few merged pieces (policies, controls, reports) are still
 API-only or not yet ported.
 
-**Status:** Phases 1–3 shipped. The assessment loop is usable in the dashboard
-under **Assessments**; Phase 4 (synthesis) is next.
+**Status:** Phases 1–4 shipped. The two halves of the platform now feed each
+other (see *Synthesis* below). Remaining: policy-driven gateway blocking, then
+decommissioning the standalone InjectGuard deployment.
 
 | Phase | What | Commit | State |
 |---|---|---|---|
 | 1 | Assessment engines + `/v1/assess/*` | `371ce4c` | ✅ shipped |
 | 2 | Tenanted storage + `/api/assess*` | `731b0ab` | ✅ shipped |
-| 3 | Dashboard UI — Assessments (Runs / Findings / Architecture) | see `git log` | ✅ shipped |
-| 4 | Synthesis: trace-derived graphs, runtime→risk feedback, policy-driven blocking | — | planned |
+| 3 | Dashboard UI — Assessments (Runs / Findings / Architecture) | `7e953a5` | ✅ shipped |
+| 4 | Synthesis: trace-derived graphs + runtime→risk feedback | see `git log` | ✅ shipped |
+| 4b | Policy storage + policy-driven gateway blocking | — | planned |
 | 5 | Decommission the standalone InjectGuard deployment | — | planned |
 
 ---
@@ -164,6 +166,46 @@ assignments) applied before any assessment evidence leaves the engine.
 Note it deliberately targets *credentials*, not PII: ingest-side redaction
 ([`packages/shared/src/redact.ts`](../packages/shared/src/redact.ts)) owns PII
 masking, and an evidence line must keep enough prompt text to stay reviewable.
+
+### 9. Synthesis — the runtime half informing the static half (Phase 4)
+
+The reason for merging the products rather than linking them. Assessment used to
+judge an application from what a human declared about it; Argus already watches
+that application run, and the record is a better witness than a form.
+
+| | |
+|---|---|
+| **Code** | [`apps/web/src/assessmentSynthesis.ts`](../apps/web/src/assessmentSynthesis.ts) — `deriveGraph`, `observedCategories` |
+| **Dashboard API** | `POST /api/assessment/graph/derive` (member+) |
+| **UI** | Assessments → Architecture → "Suggest from traces"; the "seen in production" badge on findings |
+| **Storage** | `assessment_findings.observed_in_production` (migration `014_assessment_observed.sql`) |
+| **Tests** | `test_assessment_risk.py`, `test_assessment_api.py`, `tests/integration/assessments.test.ts` |
+
+**Trace-derived architecture.** Distinct observation spans become components
+(`generation`→model, `retrieval`→document source, `tool`→tool), a component that
+*ever* handled untrusted content is marked untrusted, tool names matching a
+side-effect vocabulary get `can_write` pre-ticked, and parent→child span
+relationships become connections. It is returned as a **proposal** and never
+written: a trace can prove a component exists, but cannot prove whether a human
+approves its writes — and that flag is what the highest-severity architecture
+rules turn on. Silently inferring it would answer the most important question
+wrong. The self-join is scoped to the project on **both** sides, because
+observation ids are caller-supplied at ingest and are not unique across tenants.
+
+**Observed exploitation → likelihood.** Before each run the web tier asks
+ClickHouse which `security_events` categories this project has actually seen
+(attempted or succeeded, last 30 days) and passes them to the engine as
+`observed_categories`. A finding whose `argus_category` — the Phase-1 taxonomy
+bridge — appears in that list is demonstrated rather than theoretical, so
+`factors_from_signal(observed_exploitation=True)` sets likelihood to its
+maximum and the rationale records why. Only likelihood moves: evidence that an
+attack is being attempted says nothing about its impact or the app's exposure.
+Findings carrying the flag sort to the top of the Findings view.
+
+The list is derived server-side and **never accepted from the request** — a
+client-supplied value would let a caller inflate its own scores, or launder
+another tenant's telemetry into its assessment. The lookup is best-effort: a
+ClickHouse failure means the run scores on inference alone rather than failing.
 
 ---
 

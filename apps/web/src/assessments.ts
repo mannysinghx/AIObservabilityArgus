@@ -18,6 +18,7 @@
 import { config } from "@argus/shared";
 import { pool } from "./db.js";
 import { safeProjectId } from "./ids.js";
+import { observedCategories } from "./assessmentSynthesis.js";
 
 // ---------------- detection-service client ----------------
 // Mirrors apps/worker/src/detectionClient.ts: same env, same auth posture
@@ -56,6 +57,8 @@ export interface AssessContextIn {
   has_compensating_controls?: boolean;
   has_sensitive_data?: boolean;
   business_criticality?: string;
+  /** Filled in by the server from telemetry, never accepted from the client. */
+  observed_categories?: string[];
 }
 
 interface AssessFindingWire {
@@ -73,6 +76,7 @@ interface AssessFindingWire {
   frameworks: Record<string, string>[];
   argus_category: string | null;
   argus_severity: string;
+  observed_in_production: boolean;
   risk: Record<string, unknown>;
   mitigations: Record<string, unknown>[];
 }
@@ -154,6 +158,18 @@ export async function runPromptAssessment(
   const safe = safeProjectId(projectId);
   if (!safe) return null;
 
+  // Phase-4 synthesis: tell the engine which attack classes this application
+  // has actually seen, so a demonstrated weakness outranks a theoretical one.
+  // Derived server-side from telemetry and NOT taken from the request — a
+  // client-supplied value here would let a caller inflate its own risk scores,
+  // and worse, quietly launder someone else's telemetry into its assessment.
+  // Best-effort: a ClickHouse blip must not block an assessment, it just means
+  // this run scores on inference alone.
+  let observed: string[] = [];
+  try {
+    observed = await observedCategories(safe);
+  } catch { /* score without runtime evidence rather than failing the run */ }
+
   const wire = await callDetection<AssessPromptWire>("/v1/assess/prompt", {
     project_id: safe,
     documents: documents.map((d) => ({
@@ -161,7 +177,7 @@ export async function runPromptAssessment(
       content: d.content,
       name: d.name ?? "",
     })),
-    context,
+    context: { ...context, observed_categories: observed },
   });
 
   // Names/kinds only — see the module header for why contents never persist.
@@ -193,13 +209,14 @@ export async function runPromptAssessment(
         `INSERT INTO assessment_findings
            (assessment_id, project_id, document_index, document_name, rule_id, title,
             category, severity, confidence, explanation, affected_lines, evidence,
-            recommendation, frameworks, argus_category, argus_severity, risk, mitigations)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
+            recommendation, frameworks, argus_category, argus_severity, risk, mitigations,
+            observed_in_production)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
         [
           assessmentId, safe, f.document_index, f.document_name, f.rule_id, f.title,
           f.category, f.severity, f.confidence, f.explanation, f.affected_lines, f.evidence,
           f.recommendation, JSON.stringify(f.frameworks), f.argus_category, f.argus_severity,
-          JSON.stringify(f.risk), JSON.stringify(f.mitigations),
+          JSON.stringify(f.risk), JSON.stringify(f.mitigations), !!f.observed_in_production,
         ],
       );
     }
@@ -363,8 +380,8 @@ export async function getAssessment(projectId: string, id: string): Promise<unkn
   const { rows: findings } = await pool.query(
     `SELECT id, document_index, document_name, rule_id, title, category, severity,
             confidence, explanation, affected_lines, evidence, recommendation,
-            frameworks, argus_category, argus_severity, risk, mitigations,
-            analyst_status, created_at
+            frameworks, argus_category, argus_severity, observed_in_production,
+            risk, mitigations, analyst_status, created_at
      FROM assessment_findings WHERE assessment_id = $1 AND project_id = $2
      ORDER BY created_at, id`,
     [safeId, safe],
@@ -376,10 +393,13 @@ export async function listFindings(projectId: string, limit = 200): Promise<unkn
   const safe = safeProjectId(projectId);
   if (!safe) return [];
   const { rows } = await pool.query(
+    // Observed-in-production first: a weakness someone is already probing is
+    // the one to work on, regardless of when it was found.
     `SELECT id, assessment_id, document_name, rule_id, title, category, severity,
-            confidence, argus_category, argus_severity, risk, analyst_status, created_at
+            confidence, argus_category, argus_severity, observed_in_production,
+            risk, analyst_status, created_at
      FROM assessment_findings WHERE project_id = $1
-     ORDER BY created_at DESC LIMIT $2`,
+     ORDER BY observed_in_production DESC, created_at DESC LIMIT $2`,
     [safe, Math.min(Math.max(limit, 1), 500)],
   );
   return rows;

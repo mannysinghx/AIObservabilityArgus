@@ -63,17 +63,30 @@ def assess_prompts(req: AssessPromptRequest) -> AssessPromptResponse:
     rule_ctx = _rule_context(req.context)
     facts = _app_facts(req.context)
 
+    # Runtime evidence, matched against each finding's attack class below.
+    observed = {c for c in req.context.observed_categories if c}
+
     findings: list[AssessFinding] = []
     for idx, doc in enumerate(req.documents):
         matches = scan_document(PromptDocument(kind=doc.kind, content=doc.content), rule_ctx)
         for m in matches:
+            argus_cat = taxonomy.argus_category(m.category)
+            # Hygiene findings map to no attack class, so they can never be
+            # "observed" — `argus_cat` is None there and must not match.
+            seen_live = bool(argus_cat) and argus_cat in observed
             risk = compute_risk(
                 factors_from_signal(
                     severity=m.severity,
                     confidence=m.confidence,
                     is_public=req.context.is_public,
                     has_compensating_controls=req.context.has_compensating_controls,
-                )
+                    observed_exploitation=seen_live,
+                ),
+                note=(
+                    f"Likelihood is maximal because {argus_cat} activity has been "
+                    "observed against this application in production."
+                    if seen_live else ""
+                ),
             )
             recs = (
                 rank_mitigations(m.category, facts)[: req.top_mitigations]
@@ -94,8 +107,9 @@ def assess_prompts(req: AssessPromptRequest) -> AssessPromptResponse:
                     evidence=m.evidence,
                     recommendation=m.recommendation,
                     frameworks=[asdict(f) for f in m.frameworks],
-                    argus_category=taxonomy.argus_category(m.category),
+                    argus_category=argus_cat,
                     argus_severity=taxonomy.argus_severity(m.severity),
+                    observed_in_production=seen_live,
                     risk=RiskBreakdown(
                         factors=asdict(risk.factors),
                         weights=risk.weights,

@@ -818,6 +818,15 @@ const assessCanWrite = () => (ROLE_RANK[PROJECT_ROLE] ?? -1) >= 1;
 const assessOptions = (opts, current) => opts.map((o) => `<option value="${esc(o)}"${o === current ? " selected" : ""}>${esc(titleCase(o))}</option>`).join("");
 const assessInput = "font:inherit;font-size:12.5px;padding:7px 10px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink)";
 
+/**
+ * The Phase-4 badge: this weakness's attack class has actually been recorded
+ * against this application. Deliberately loud — it is the difference between
+ * "this could be exploited" and "someone is trying this", and it is the whole
+ * argument for running observability and assessment in one product.
+ */
+const assessObservedTag = () =>
+  `<span class="pill pill-critical" title="This attack class has been recorded against this application in production, so its likelihood is scored at maximum.">seen in production</span>`;
+
 async function loadAssess() {
   if (!PROJECT) { banner("Open an application from Applications to assess it."); return; }
   banner("");
@@ -1026,10 +1035,11 @@ function assessFindingCard(f) {
   const factors = risk.factors || {};
   return `<div class="card" style="margin-top:calc(var(--u)*3)">
     <div class="card-head" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-      <span class="card-title" style="display:flex;gap:9px;align-items:center">
+      <span class="card-title" style="display:flex;gap:9px;align-items:center;flex-wrap:wrap">
         ${pill(f.argus_severity || "info")}
         <span class="mono dim" style="font-size:11.5px">${esc(f.rule_id)}</span>
         ${esc(f.title)}
+        ${f.observed_in_production ? assessObservedTag() : ""}
       </span>
       ${risk.final_score != null ? `<span class="mono" style="font-size:13px">risk ${num(risk.final_score)}</span>` : ""}
     </div>
@@ -1106,7 +1116,7 @@ async function renderAssessFindings() {
         ${rows.map((f) => `<tr class="evt">
           <td>${pill(f.argus_severity || "info")}</td>
           <td class="mono dim" style="font-size:11.5px">${esc(f.rule_id)}</td>
-          <td>${esc(f.title)}${f.document_name ? `<div class="dim" style="font-size:11px">${esc(f.document_name)}</div>` : ""}</td>
+          <td>${esc(f.title)} ${f.observed_in_production ? assessObservedTag() : ""}${f.document_name ? `<div class="dim" style="font-size:11px">${esc(f.document_name)}</div>` : ""}</td>
           <td class="dim">${esc(titleCase(f.category))}</td>
           <td class="mono">${f.risk && f.risk.final_score != null ? num(f.risk.final_score) : "—"}</td>
           <td>${assessStatusControl(f)}</td>
@@ -1146,10 +1156,12 @@ function renderAssessArch() {
         </tbody></table></div>
         ${editable ? '<button class="btn" id="assessAddEdge" type="button" style="margin-top:9px;padding:6px 12px;font-size:12px">+ Add connection</button>' : ""}
 
-        ${editable ? `<div style="margin-top:calc(var(--u)*4);display:flex;gap:8px">
+        ${editable ? `<div style="margin-top:calc(var(--u)*4);display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn btn-primary" id="assessSaveGraph" type="button" style="padding:8px 16px;font-size:12.5px">Save</button>
           <button class="btn" id="assessAnalyzeGraph" type="button" style="padding:8px 16px;font-size:12.5px">Save &amp; analyze</button>
-        </div>` : '<div class="dim" style="margin-top:calc(var(--u)*3);font-size:12.5px">Editing needs the <b>member</b> role.</div>'}
+          <button class="btn" id="assessDeriveGraph" type="button" style="padding:8px 16px;font-size:12.5px" title="Build a starting point from the traces Argus has already recorded">Suggest from traces</button>
+        </div>
+        <div class="dim" style="margin-top:8px;font-size:11.5px">“Suggest from traces” reads what your app has actually done and proposes components and connections. It replaces what's on screen but saves nothing until you press Save — and it can't tell whether a write needs human approval, so check those boxes yourself.</div>` : '<div class="dim" style="margin-top:calc(var(--u)*3);font-size:12.5px">Editing needs the <b>member</b> role.</div>'}
       </div>
     </div>
     <div id="assessArchResult"></div>`;
@@ -1215,6 +1227,38 @@ function wireAssessArch() {
   }));
   $("#assessSaveGraph")?.addEventListener("click", () => saveAssessGraph(false));
   $("#assessAnalyzeGraph")?.addEventListener("click", () => saveAssessGraph(true));
+  $("#assessDeriveGraph")?.addEventListener("click", deriveAssessGraph);
+}
+
+/** Replace the on-screen graph with one proposed from observed traces. Nothing
+ *  is written — the user reviews, fixes the approval flags, then saves. */
+async function deriveAssessGraph() {
+  const btn = $("#assessDeriveGraph");
+  btn.disabled = true; btn.textContent = "Reading traces…";
+  try {
+    const res = await fetch("/api/assessment/graph/derive", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ project: PROJECT }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { banner(d.error || "Could not read traces."); return; }
+    if (!d.nodes || !d.nodes.length) {
+      banner("No components could be derived yet — Argus hasn't recorded enough traffic from this app.");
+      return;
+    }
+    ASSESS_GRAPH = { nodes: d.nodes, edges: d.edges || [], updatedAt: ASSESS_GRAPH.updatedAt };
+    banner("");
+    renderAssessArch();
+    $("#assessArchResult").innerHTML = `<div class="card" style="margin-top:calc(var(--u)*3)"><div class="pad" style="padding:calc(var(--u)*3);font-size:12.5px;color:var(--ink-muted)">
+      Proposed <b>${num(d.nodes.length)}</b> component${d.nodes.length === 1 ? "" : "s"} and <b>${num((d.edges || []).length)}</b> connection${(d.edges || []).length === 1 ? "" : "s"} from ${num(d.observations || 0)} recorded spans.
+      <b>Nothing is saved yet.</b> Check the trust levels and tick “needs approval” where a human really does confirm the action — that flag can't be read from a trace, and it's the one the highest-severity rules turn on.
+    </div></div>`;
+  } catch (e) {
+    banner("Could not read traces: " + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = "Suggest from traces";
+  }
 }
 
 /** Read the DOM back into ASSESS_GRAPH so edits survive a re-render. */

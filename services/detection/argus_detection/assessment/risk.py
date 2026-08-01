@@ -66,7 +66,11 @@ def severity_for(score: int) -> str:
     return "informational"
 
 
-def compute_risk(factors: RiskFactors) -> RiskResult:
+def compute_risk(factors: RiskFactors, note: str = "") -> RiskResult:
+    """Score the factors. `note` is appended to the rationale — used to record
+    *why* a factor was set where it was when the reason is evidence rather than
+    the default derivation (e.g. runtime telemetry raising likelihood). The
+    score stays a pure function of the factors; the note only explains them."""
     factors.validate()
     contributions = {
         name: WEIGHTS[name] * _norm(getattr(factors, name))
@@ -86,6 +90,8 @@ def compute_risk(factors: RiskFactors) -> RiskResult:
         f"(weighted). Confidence={factors.confidence} adjusts {conf_adj:+d} → {final_score} "
         f"({severity})."
     )
+    if note:
+        rationale = f"{rationale} {note}"
     return RiskResult(
         factors=factors,
         weights=dict(WEIGHTS),
@@ -110,9 +116,19 @@ def factors_from_signal(
     confidence: str = "medium",
     is_public: bool = False,
     has_compensating_controls: bool = False,
+    observed_exploitation: bool = False,
 ) -> RiskFactors:
+    """Map a signal to factors.
+
+    `observed_exploitation` is the Phase-4 synthesis input: the runtime side has
+    actually recorded attempts of this weakness's attack class against THIS
+    application. Without it, likelihood is only a proxy derived from impact —
+    an informed guess about whether anyone would try. With it, guessing is over,
+    so likelihood goes to its maximum. This is the one factor backed by evidence
+    rather than inference, and it is deliberately the strongest.
+    """
     impact = _IMPACT.get(severity, 3)
-    likelihood = max(1, min(5, impact))
+    likelihood = 5 if observed_exploitation else max(1, min(5, impact))
     exposure = 5 if is_public else 3
     control_weakness = 2 if has_compensating_controls else 4
     conf = _CONFIDENCE.get(confidence, 3)

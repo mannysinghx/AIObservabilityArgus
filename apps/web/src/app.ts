@@ -17,6 +17,7 @@ import * as Governance from "./dataGovernance.js";
 import { registerPublicApi } from "./publicRoutes.js";
 import * as Alerts from "./alertAdmin.js";
 import * as Assessments from "./assessments.js";
+import * as Synthesis from "./assessmentSynthesis.js";
 import { applySecurityHeaders } from "./headers.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -790,6 +791,23 @@ export async function buildApp() {
       } catch (err) { app.log.error({ err }, "graph save failed"); reply.code(500).send({ error: String(err) }); }
     },
   );
+
+  // Phase 4: propose a graph from observed traces. A PROPOSAL — it is returned
+  // for review and never written, because traces can prove a component exists
+  // but cannot prove whether a human approves its writes, and that is the fact
+  // the highest-severity architecture rules turn on.
+  app.post<{ Body: { project?: string } }>("/api/assessment/graph/derive", async (req, reply) => {
+    const g = await roleGate(req, reply, req.body?.project, "member");
+    if (!g) return;
+    try {
+      const derived = await Synthesis.deriveGraph(req.body!.project!);
+      audit(req, "assessment.graph_derived", {
+        orgId: g.orgId, targetType: "assessment_graph", target: req.body!.project!,
+        metadata: { project: req.body?.project, nodes: derived.nodes.length, edges: derived.edges.length },
+      });
+      return derived;
+    } catch (err) { app.log.error({ err }, "graph derive failed"); reply.code(503).send({ error: "could not read traces" }); }
+  });
 
   app.post<{ Body: { project?: string } }>("/api/assessment/graph/analyze", async (req, reply) => {
     const g = await roleGate(req, reply, req.body?.project, "member");

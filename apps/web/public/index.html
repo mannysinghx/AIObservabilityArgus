@@ -1117,6 +1117,12 @@
                 <tr><td><b>Framework references</b></td><td>OWASP LLM Top 10, MITRE ATLAS, NIST AI RMF. This is what makes a finding usable in an audit conversation rather than only an engineering one.</td></tr>
               </table>
 
+              <h3>Where this gets interesting: your traces feed the assessment</h3>
+              <p>Assessment and observability normally live in different tools, which means the static side has to guess at things the runtime side already knows. Here they're the same product, so two things happen automatically.</p>
+              <p><b>“Suggest from traces”</b> (Architecture tab) builds a starting graph out of what your application has actually done — the models, retrieval steps and tools Argus has recorded, which of them handled untrusted content, and how they call each other. It's a proposal: it replaces what's on screen and saves nothing until you press Save. One thing it deliberately won't guess is whether a write is human-approved — no trace can show you that, and it's the flag the most serious rules turn on, so you tick it yourself.</p>
+              <p><b>“Seen in production”</b> on a finding means Argus has recorded that attack class being attempted against <i>this</i> application in the last 30 days. When that happens the finding's likelihood is scored at maximum and the rationale says so. This is the difference between "an attacker could exploit this" and "someone is already trying" — and findings carrying the badge sort to the top of the Findings tab, because that's the work worth doing first.</p>
+              <p class="dim">Only likelihood moves. Evidence that people are attempting an attack says nothing about how damaging it would be or how exposed you are, so impact, exposure and control weakness are untouched — a low-impact finding does not become critical just because it's being probed.</p>
+
               <h3>The facts you declare matter</h3>
               <p>The checkboxes on the Runs tab are not decoration — they change real outcomes. Declaring write-capable tools without an approval step fires a rule that prompt text alone could never reveal, and a public-facing app scores higher on exposure. Fill them in honestly: an assessment run against optimistic facts is a reassuring number about an application that doesn't exist. Fill in the Architecture tab and Argus derives most of them for you.</p>
 

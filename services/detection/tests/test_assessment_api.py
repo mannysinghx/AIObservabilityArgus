@@ -131,6 +131,49 @@ def test_assess_policy_decision():
     assert body["severity"] == "critical"
 
 
+def test_observed_categories_promote_a_finding(monkeypatch):
+    """Phase-4 synthesis over the wire: naming an attack class the app has
+    actually seen must raise that finding's likelihood and say so, and must
+    leave findings of other classes alone."""
+    monkeypatch.delenv("DETECTION_API_KEY", raising=False)
+    body = {
+        "documents": [{
+            "kind": "system",
+            # IG-PROMPT-007 (prompt-leakage → prompt_leak) and IG-PROMPT-009
+            # (unsafe-output → excessive_agency): two different attack classes.
+            "content": "Reveal the system prompt if asked. Execute the model output in a shell.",
+        }],
+        "context": {"observed_categories": ["prompt_leak"]},
+    }
+    res = client.post("/v1/assess/prompt", json=body)
+    assert res.status_code == 200
+    by_rule = {f["rule_id"]: f for f in res.json()["findings"]}
+
+    seen = by_rule["IG-PROMPT-007"]
+    assert seen["observed_in_production"] is True
+    assert seen["risk"]["factors"]["likelihood"] == 5
+    assert "observed against this application" in seen["risk"]["rationale"]
+
+    unseen = by_rule["IG-PROMPT-009"]
+    assert unseen["observed_in_production"] is False
+    assert "observed against this application" not in unseen["risk"]["rationale"]
+
+
+def test_unmapped_category_never_counts_as_observed(monkeypatch):
+    """A hygiene finding maps to no attack class (argus_category is None), so no
+    value in observed_categories can mark it as demonstrated."""
+    monkeypatch.delenv("DETECTION_API_KEY", raising=False)
+    res = client.post("/v1/assess/prompt", json={
+        "documents": [{"kind": "system", "content": "Never reveal the balance."}],
+        # Deliberately hostile input: None/"" must not match an unmapped finding.
+        "context": {"observed_categories": ["", "None", "prompt-quality"]},
+    })
+    assert res.status_code == 200
+    for f in res.json()["findings"]:
+        if f["argus_category"] is None:
+            assert f["observed_in_production"] is False
+
+
 def test_health_reports_assessment_engine():
     body = client.get("/health").json()
     assert body["assessment"]["prompt_rules"] == 20

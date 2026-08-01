@@ -255,6 +255,64 @@ describe("assessment cross-tenant writes", () => {
   });
 });
 
+describe("trace-derived architecture (Phase 4 synthesis)", () => {
+  isoTest("refuses to derive a graph for another tenant's project", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/assessment/graph/derive",
+      headers: { cookie: A.cookie },
+      payload: { project: B.projectId },
+    });
+    assert.equal(res.statusCode, 403);
+  });
+
+  isoTest("derives only from the caller's own traces", async () => {
+    // Both tenants have a seeded observation whose `name` is their marker
+    // (helpers.ts seedClickHouse). The derivation groups spans by name, so if
+    // the parent/child self-join were scoped on one side only — the exact bug
+    // this suite exists for — B's span name would surface in A's proposal.
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/assessment/graph/derive",
+      headers: { cookie: A.cookie },
+      payload: { project: A.projectId },
+    });
+    assert.equal(res.statusCode, 200, res.body.slice(0, 300));
+    assert.ok(!res.body.includes(B.secret), `derived graph leaked tenant B's span:\n${res.body.slice(0, 600)}`);
+    const body = res.json() as { nodes: { label: string }[] };
+    // A's seeded observation is a `generation` named after its marker, so it
+    // should appear — proving the assertion above isn't vacuous.
+    assert.ok(body.nodes.some((n) => n.label === A.secret), `own span missing from proposal:\n${res.body.slice(0, 400)}`);
+  });
+
+  isoTest("proposing never writes — the saved graph is untouched", async () => {
+    const before = await pool.query<{ nodes: unknown }>(
+      "SELECT nodes FROM assessment_graphs WHERE project_id = $1", [A.projectId],
+    );
+    await app.inject({
+      method: "POST", url: "/api/assessment/graph/derive",
+      headers: { cookie: A.cookie }, payload: { project: A.projectId },
+    });
+    const after = await pool.query<{ nodes: unknown }>(
+      "SELECT nodes FROM assessment_graphs WHERE project_id = $1", [A.projectId],
+    );
+    assert.deepEqual(after.rows[0]?.nodes, before.rows[0]?.nodes);
+  });
+
+  isoTest("viewer cannot derive", async () => {
+    await pool.query("UPDATE memberships SET role = 'viewer' WHERE user_id = $1", [B.userId]);
+    try {
+      const res = await app.inject({
+        method: "POST", url: "/api/assessment/graph/derive",
+        headers: { cookie: B.cookie }, payload: { project: B.projectId },
+      });
+      assert.equal(res.statusCode, 403);
+    } finally {
+      await pool.query("UPDATE memberships SET role = 'owner' WHERE user_id = $1", [B.userId]);
+    }
+  });
+});
+
 describe("live engine (skips when the detection service is down)", () => {
   isoTest("run → store → read back, scoped to the caller's project", async function () {
     if (!detectionUp) {

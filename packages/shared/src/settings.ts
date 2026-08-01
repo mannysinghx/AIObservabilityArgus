@@ -34,6 +34,24 @@ export interface DetectionConfig {
   };
   canaries: { enabled: boolean };
   alerting: { min_severity: Severity; channels: string[] };
+  /** Inline gateway blocking, per application (Phase 4b).
+   *
+   *  Previously the gateway's policy came only from environment variables,
+   *  which meant one deployment-wide setting: turning on blocking for the app
+   *  that wanted it turned it on for every tenant sharing the proxy. These are
+   *  the same three knobs, per project.
+   *
+   *  `mode: "inherit"` means "whatever the deployment is configured to do" and
+   *  is the default, so adding this section changes nothing until someone opts
+   *  a project in. Empty `block_categories` likewise means "use the built-in
+   *  list" rather than "block nothing", because a stored empty array is far
+   *  more likely to be an unset field than a deliberate instruction to disable
+   *  the feature while leaving block mode on. */
+  gateway: {
+    mode: "inherit" | "observe" | "block";
+    block_threshold: number;
+    block_categories: string[];
+  };
 }
 
 export const DEFAULT_DETECTION_CONFIG: DetectionConfig = {
@@ -47,10 +65,20 @@ export const DEFAULT_DETECTION_CONFIG: DetectionConfig = {
   },
   canaries: { enabled: true },
   alerting: { min_severity: "high", channels: [] },
+  gateway: { mode: "inherit", block_threshold: 75, block_categories: [] },
 };
 
 const SEVERITIES: Severity[] = ["info", "low", "medium", "high", "critical"];
 const REDACTION_MODES: RedactionMode[] = ["off", "mask_pii", "drop_content"];
+
+export type GatewayConfigMode = "inherit" | "observe" | "block";
+const GATEWAY_MODES: GatewayConfigMode[] = ["inherit", "observe", "block"];
+/** Kept in step with BLOCKABLE in gateway.ts — the categories a single message
+ *  with no trace context can be trusted to judge. Duplicated as a literal here
+ *  rather than imported because settings.ts is loaded by ingest and the worker,
+ *  which have no business pulling in the gateway module; the gateway's own test
+ *  asserts the two lists agree. */
+const GATEWAY_BLOCKABLE = ["direct_injection", "jailbreak"];
 
 // ---- coercion helpers: every field validated + clamped, never trusts input ----
 const asObj = (v: unknown): Record<string, unknown> =>
@@ -103,6 +131,22 @@ export function mergeConfig(raw: unknown): DetectionConfig {
       min_severity: (SEVERITIES.includes(sev as Severity) ? sev : d.alerting.min_severity) as Severity,
       channels: Array.isArray(alerting.channels) ? alerting.channels.map(String).slice(0, 20) : [],
     },
+    gateway: (() => {
+      const g = asObj(r.gateway);
+      const m = str(g.mode, d.gateway.mode);
+      return {
+        mode: (GATEWAY_MODES.includes(m as GatewayConfigMode) ? m : d.gateway.mode) as GatewayConfigMode,
+        block_threshold: num(g.block_threshold, d.gateway.block_threshold, 0, 100),
+        // Only categories the single-message gateway is equipped to judge are
+        // accepted. A project cannot opt itself into blocking on, say,
+        // indirect_injection — that verdict needs trace context the proxy does
+        // not have, and honouring it would block real users to catch an attack
+        // this layer cannot actually see.
+        block_categories: Array.isArray(g.block_categories)
+          ? [...new Set(g.block_categories.map(String).filter((c) => GATEWAY_BLOCKABLE.includes(c)))]
+          : [],
+      };
+    })(),
   };
 }
 

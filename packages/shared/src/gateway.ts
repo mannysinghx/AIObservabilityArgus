@@ -38,6 +38,10 @@ export interface GatewayPolicy {
   latencyBudgetMs: number;
   /** What to do when detection is unavailable. */
   onFailure: FailureMode;
+  /** Which finding categories may cause a block. Always a subset of BLOCKABLE;
+   *  a project can narrow this but never widen it beyond what one message
+   *  without trace context can honestly support. */
+  blockCategories?: Set<string>;
 }
 
 export const DEFAULT_GATEWAY_POLICY: GatewayPolicy = {
@@ -89,7 +93,39 @@ export function gatewayPolicyFromEnv(): GatewayPolicy {
 }
 
 /** Categories a single message, with no trace context, can be trusted to judge. */
-const BLOCKABLE = new Set(["direct_injection", "jailbreak"]);
+export const BLOCKABLE = new Set(["direct_injection", "jailbreak"]);
+
+/**
+ * Fold a project's stored gateway settings into the deployment-wide policy.
+ *
+ * The environment sets what the proxy does by default; a project may narrow or
+ * widen its own behaviour within the bounds the code allows. Three rules:
+ *
+ *   - `inherit` (the default) changes nothing, so adding per-project settings
+ *     is a no-op until someone deliberately opts in.
+ *   - An empty category list means "use the built-in set", not "block nothing".
+ *     A stored empty array is far more likely to be an unset field than an
+ *     instruction to disable blocking while leaving block mode on, and the
+ *     dangerous reading of an ambiguous config is the wrong one to take.
+ *   - Categories outside BLOCKABLE were already dropped by mergeConfig; the
+ *     intersection here is belt-and-braces for configs written before that
+ *     validation existed.
+ */
+export function withProjectSettings(
+  policy: GatewayPolicy,
+  settings?: { mode?: string; block_threshold?: number; block_categories?: string[] } | null,
+): GatewayPolicy {
+  if (!settings) return policy;
+  const mode = settings.mode === "block" || settings.mode === "observe" ? settings.mode : policy.mode;
+  const t = Number(settings.block_threshold);
+  const categories = (settings.block_categories ?? []).filter((c) => BLOCKABLE.has(c));
+  return {
+    ...policy,
+    mode,
+    blockThreshold: Number.isFinite(t) ? Math.min(100, Math.max(0, t)) : policy.blockThreshold,
+    blockCategories: categories.length ? new Set(categories) : policy.blockCategories,
+  };
+}
 
 export interface ScanVerdict {
   blocked: boolean;
@@ -176,8 +212,11 @@ export async function evaluate(
     return allow(`detection unavailable, allowed (fail-open): ${String(err)}`, true);
   }
 
+  // A project may narrow the blockable set; it can never widen it past what a
+  // single message with no trace context can honestly judge.
+  const blockable = policy.blockCategories ?? BLOCKABLE;
   const worst = findings
-    .filter((f) => BLOCKABLE.has(f.category))
+    .filter((f) => blockable.has(f.category) && BLOCKABLE.has(f.category))
     .sort((a, b) => b.score - a.score)[0];
 
   if (!worst) return allow("no blockable finding");

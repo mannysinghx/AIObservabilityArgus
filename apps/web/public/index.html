@@ -418,6 +418,35 @@
         </div>
 
         <div class="card">
+          <div class="card-head"><span class="card-title">Inline gateway</span></div>
+          <div class="pad" style="display:grid;gap:calc(var(--u)*3.5);padding:calc(var(--u)*3.2)">
+            <div class="dim" style="font-size:12.5px;line-height:1.6">
+              Only applies if this application's traffic goes through the Argus gateway proxy. The gateway sees one
+              message with no trace context, so it blocks a deliberately narrow set of things at a deliberately high
+              bar — it is not where the cross-trace detections happen. If detection is slow or down, requests are
+              <b>allowed through</b>; a security proxy that takes production offline gets uninstalled, and then it
+              protects nothing.
+            </div>
+            <div class="set-row">
+              <div class="set-label"><label for="setGwMode">Blocking</label><span class="set-hint">“Follow the deployment” uses whatever this Argus install is configured to do. Override it only for this application.</span></div>
+              <div class="set-control">
+                <select id="setGwMode" class="set-select">
+                  <option value="inherit">Follow the deployment default</option>
+                  <option value="observe">Never block — record only</option>
+                  <option value="block">Block high-confidence attacks</option>
+                </select>
+              </div>
+            </div>
+            <div class="set-row">
+              <div class="set-label"><label for="setGwThreshold">Block at score</label><span class="set-hint">Higher blocks less and is safer for real users. 75 is the measured default: the point where at least two independent rules must agree.</span></div>
+              <div class="set-control">
+                <input id="setGwThreshold" class="set-select" type="number" min="0" max="100" step="5" style="width:110px">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
           <div class="card-head"><span class="card-title">Enforcement</span><span class="card-hint">optional gateway</span></div>
           <div class="pad" style="padding:calc(var(--u)*3.2);font-size:12.5px;color:var(--ink-muted)">
             By default Argus runs in <b>Observe</b> mode — it records and alerts from beside your app's critical path, so it can
@@ -570,6 +599,7 @@
           <button class="dtab active" type="button" data-atab="runs">Runs</button>
           <button class="dtab" type="button" data-atab="findings">Findings</button>
           <button class="dtab" type="button" data-atab="arch">Architecture</button>
+          <button class="dtab" type="button" data-atab="policies">Policies</button>
         </div>
         <div id="assessPane"></div>
       </section>

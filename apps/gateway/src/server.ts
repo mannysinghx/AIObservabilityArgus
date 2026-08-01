@@ -23,9 +23,11 @@ import Fastify from "fastify";
 import {
   evaluate,
   gatewayPolicyFromEnv,
+  loadProjectConfig,
   metrics,
   redis,
   STREAM_KEY,
+  withProjectSettings,
   type StreamEvent,
   type ObservationInput,
   type TraceInput,
@@ -148,9 +150,23 @@ app.post("/v1/chat/completions", async (req, reply) => {
   const model = String(body.model ?? "");
   const input = userText(body);
 
-  const verdict = await evaluate(projectId, input, policy);
-  metrics.observe("gateway_scan_duration_ms", verdict.latencyMs, { mode: policy.mode });
-  if (verdict.degraded) metrics.inc("gateway_scan_degraded_total", { failure: policy.onFailure });
+  // Per-project overrides on top of the deployment default. loadProjectConfig
+  // is cached ~30s and already fails open to defaults, but it is wrapped again
+  // here: a settings lookup is not a reason to fail a customer's request, and
+  // this file's whole contract is that every ambiguous case lets traffic
+  // through. Falling back to `policy` keeps the deployment-wide behaviour,
+  // which is exactly what happened before per-project settings existed.
+  let effective = policy;
+  try {
+    const cfg = await loadProjectConfig(projectId);
+    effective = withProjectSettings(policy, cfg.gateway);
+  } catch (err) {
+    app.log.warn({ err }, "gateway project settings unavailable, using deployment policy");
+  }
+
+  const verdict = await evaluate(projectId, input, effective);
+  metrics.observe("gateway_scan_duration_ms", verdict.latencyMs, { mode: effective.mode });
+  if (verdict.degraded) metrics.inc("gateway_scan_degraded_total", { failure: effective.onFailure });
 
   if (verdict.blocked) {
     metrics.inc("gateway_blocked_total", { category: verdict.category || "unavailable" });
@@ -172,7 +188,10 @@ app.post("/v1/chat/completions", async (req, reply) => {
     return;
   }
 
-  metrics.inc("gateway_allowed_total", { mode: policy.mode });
+  // `effective`, not `policy`: with per-project settings the mode that actually
+  // decided this request may differ from the deployment default, and a metric
+  // that reports the wrong one makes "why wasn't this blocked?" unanswerable.
+  metrics.inc("gateway_allowed_total", { mode: effective.mode });
 
   // Forward upstream with the caller's own Authorization header untouched.
   let upstreamRes: Response;

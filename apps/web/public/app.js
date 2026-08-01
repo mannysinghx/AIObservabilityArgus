@@ -854,6 +854,7 @@ $("#assessTabs")?.addEventListener("click", (e) => {
 function renderAssessTab() {
   if (ASSESS_TAB === "findings") return renderAssessFindings();
   if (ASSESS_TAB === "arch") return renderAssessArch();
+  if (ASSESS_TAB === "policies") return renderAssessPolicies();
   return renderAssessRuns();
 }
 
@@ -1325,6 +1326,270 @@ async function analyzeAssessGraph() {
   } catch (e) { banner("Could not analyze the architecture: " + e.message); }
 }
 
+// ---- Policies tab ---------------------------------------------------------
+// A policy asks a question about the application's current state and returns an
+// action. The conditions are authored here as rows rather than raw JSON: the
+// engine's grammar is a dotted-path map, which is fine to store and hostile to
+// type. Every field offered below is one `buildContext` can actually prove —
+// there is no way to author a condition Argus cannot answer, because a policy
+// that silently never matches is worse than no policy.
+const POLICY_FIELDS = [
+  { path: "application.has_write_capable_tools", label: "Has write-capable tools", type: "bool" },
+  { path: "application.human_approval_enabled", label: "Every write needs human approval", type: "bool" },
+  { path: "application.has_retrieval", label: "Uses retrieval / RAG", type: "bool" },
+  { path: "application.has_untrusted_component", label: "Has an untrusted component", type: "bool" },
+  { path: "application.crosses_tenant_boundary", label: "Data crosses a tenant boundary", type: "bool" },
+  { path: "application.described", label: "Architecture has been described", type: "bool" },
+  { path: "application.open_critical_findings", label: "Open critical findings", type: "num" },
+  { path: "application.open_high_findings", label: "Open high findings", type: "num" },
+  { path: "application.open_findings", label: "Open findings (any severity)", type: "num" },
+  { path: "application.observed_in_production_findings", label: "Open findings seen in production", type: "num" },
+  { path: "application.component_count", label: "Number of components", type: "num" },
+];
+const POLICY_ACTIONS = [
+  ["warn", "Warn only"],
+  ["block_deployment", "Block deployment"],
+  ["block_assessment_approval", "Block assessment sign-off"],
+];
+const FIELD_BY_PATH = Object.fromEntries(POLICY_FIELDS.map((f) => [f.path, f]));
+let POLICY_DRAFT = [{ path: POLICY_FIELDS[0].path, op: "true", value: 1 }];
+
+async function renderAssessPolicies() {
+  assessLoading();
+  try {
+    const d = await api("/api/policies");
+    assessPane().innerHTML = policyIntroHtml() + policyBuilderHtml() + policyListHtml(d.policies || []);
+    wireAssessPolicies();
+  } catch (e) { assessError(e); }
+}
+
+function policyIntroHtml() {
+  return `<div class="card"><div class="pad dim" style="padding:calc(var(--u)*3);font-size:12.5px">
+    A policy is a rule about how this application is allowed to be built — "don't ship while a critical finding is open",
+    "a public app must have human approval on writes". Argus checks them against what it actually knows: the architecture
+    you described and the findings your assessments produced. Every condition is joined with <b>and</b>, and a condition
+    Argus can't answer never matches, so a rule fails safe rather than firing on a guess.
+    <div style="margin-top:8px">These are <b>governance</b> rules, checked when you ask. They are not the inline gateway —
+    that blocks single messages in milliseconds and is configured per application in Settings.</div>
+  </div></div>`;
+}
+
+function policyBuilderHtml() {
+  if (!assessCanWrite()) return "";
+  const row = (r, i) => {
+    const f = FIELD_BY_PATH[r.path] || POLICY_FIELDS[0];
+    const ops = f.type === "bool"
+      ? [["true", "is yes"], ["false", "is no"]]
+      : [["gte", "is at least"], ["lte", "is at most"], ["gt", "is more than"], ["lt", "is fewer than"]];
+    return `<div class="prow" data-prow="${i}" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+      <select data-pfield="path" style="${assessInput};flex:1;min-width:220px">
+        ${POLICY_FIELDS.map((x) => `<option value="${esc(x.path)}"${x.path === r.path ? " selected" : ""}>${esc(x.label)}</option>`).join("")}
+      </select>
+      <select data-pfield="op" style="${assessInput}">
+        ${ops.map(([v, l]) => `<option value="${esc(v)}"${v === r.op ? " selected" : ""}>${esc(l)}</option>`).join("")}
+      </select>
+      ${f.type === "num" ? `<input type="number" min="0" data-pfield="value" value="${esc(r.value ?? 1)}" style="${assessInput};width:90px">` : ""}
+      ${POLICY_DRAFT.length > 1 ? `<button class="btn" type="button" data-pdel="${i}" style="padding:3px 9px;font-size:11px">remove</button>` : ""}
+    </div>`;
+  };
+  return `<div class="card" style="margin-top:calc(var(--u)*3)">
+    <div class="card-head"><span class="card-title">New policy</span></div>
+    <div class="pad" style="padding:calc(var(--u)*3);display:grid;gap:calc(var(--u)*2.5)">
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <div style="flex:1;min-width:220px">
+          <label for="policyName" style="font-size:12px;font-weight:600;display:block;margin-bottom:5px">Name it</label>
+          <input id="policyName" type="text" placeholder="e.g. no shipping with open criticals" style="${assessInput};width:100%">
+        </div>
+        <div style="min-width:190px">
+          <label for="policyAction" style="font-size:12px;font-weight:600;display:block;margin-bottom:5px">If it matches</label>
+          <select id="policyAction" style="${assessInput};width:100%">${POLICY_ACTIONS.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join("")}</select>
+        </div>
+        <div style="min-width:140px">
+          <label for="policySeverity" style="font-size:12px;font-weight:600;display:block;margin-bottom:5px">Severity</label>
+          <select id="policySeverity" style="${assessInput};width:100%">${assessOptions(["critical", "high", "medium", "low"], "medium")}</select>
+        </div>
+      </div>
+      <div>
+        <div style="font-size:12px;font-weight:600;margin-bottom:7px">When all of these are true</div>
+        <div id="policyRows">${POLICY_DRAFT.map(row).join("")}</div>
+        <button class="btn" id="policyAddRow" type="button" style="padding:5px 11px;font-size:11.5px">+ Add condition</button>
+      </div>
+      <div>
+        <label for="policyMessage" style="font-size:12px;font-weight:600;display:block;margin-bottom:5px">What should someone do about it? <span class="dim" style="font-weight:400">(optional)</span></label>
+        <input id="policyMessage" type="text" placeholder="e.g. resolve the critical findings or record an exception before release" style="${assessInput};width:100%">
+      </div>
+      <div><button class="btn btn-primary" id="policyCreate" type="button" style="padding:8px 16px;font-size:12.5px">Create policy</button></div>
+    </div>
+  </div>`;
+}
+
+function policyListHtml(rows) {
+  const head = `<div class="card-head" style="display:flex;justify-content:space-between;align-items:center">
+      <span class="card-title">Policies</span>
+      <button class="btn" id="policyEvaluate" type="button" style="padding:6px 12px;font-size:12px">Check against this app now</button>
+    </div>`;
+  if (!rows.length) {
+    return `<div class="card" style="margin-top:calc(var(--u)*3)">${head}<div class="empty-cta">
+      <div class="big">No policies yet</div>
+      <p>Nothing is enforced until you write a rule. A good first one: block deployment when an open critical finding exists.</p>
+    </div></div><div id="policyResult"></div>`;
+  }
+  return `<div class="card" style="margin-top:calc(var(--u)*3)">${head}
+    <div class="tablewrap"><table class="feed"><tbody>
+      <tr><th>Policy</th><th>When</th><th>Action</th><th>Severity</th><th>Enabled</th><th></th></tr>
+      ${rows.map((p) => `<tr class="evt">
+        <td>${esc(p.name)}${p.message ? `<div class="dim" style="font-size:11px">${esc(p.message)}</div>` : ""}</td>
+        <td class="dim" style="font-size:11.5px">${esc(describeConditions(p.conditions))}</td>
+        <td>${esc(titleCase(p.action))}</td>
+        <td>${pill(p.result_severity === "informational" ? "info" : p.result_severity)}</td>
+        <td>${assessCanWrite()
+          ? `<input type="checkbox" data-ptoggle="${esc(p.id)}"${p.enabled ? " checked" : ""}>`
+          : (p.enabled ? "yes" : "no")}</td>
+        <td style="text-align:right">${assessCanWrite() ? `<button class="btn" type="button" data-pdelete="${esc(p.id)}" style="padding:3px 9px;font-size:11px">delete</button>` : ""}</td>
+      </tr>`).join("")}
+    </tbody></table></div>
+  </div><div id="policyResult"></div>`;
+}
+
+/** Render a stored condition map back into the language the builder speaks. */
+function describeConditions(conds) {
+  const parts = [];
+  for (const [path, matcher] of Object.entries(conds || {})) {
+    const label = FIELD_BY_PATH[path]?.label || path;
+    if (matcher === true) parts.push(`${label} is yes`);
+    else if (matcher === false) parts.push(`${label} is no`);
+    else if (matcher && typeof matcher === "object") {
+      const [op, v] = Object.entries(matcher)[0] || [];
+      const word = { gte: "at least", lte: "at most", gt: "more than", lt: "fewer than" }[op] || op;
+      parts.push(`${label} ${word} ${v}`);
+    } else parts.push(`${label} = ${matcher}`);
+  }
+  return parts.join(" and ") || "—";
+}
+
+function harvestPolicyDraft() {
+  const rows = assessPane().querySelectorAll("#policyRows [data-prow]");
+  POLICY_DRAFT = [...rows].map((tr) => {
+    const get = (n) => tr.querySelector(`[data-pfield="${n}"]`);
+    return { path: get("path").value, op: get("op").value, value: Number(get("value")?.value ?? 1) };
+  });
+}
+
+/** Builder rows → the engine's condition map. */
+function draftToConditions() {
+  const out = {};
+  for (const r of POLICY_DRAFT) {
+    if (r.op === "true") out[r.path] = true;
+    else if (r.op === "false") out[r.path] = false;
+    else out[r.path] = { [r.op]: Number.isFinite(r.value) ? r.value : 1 };
+  }
+  return out;
+}
+
+function wireAssessPolicies() {
+  $("#policyAddRow")?.addEventListener("click", () => {
+    harvestPolicyDraft();
+    POLICY_DRAFT.push({ path: POLICY_FIELDS[0].path, op: "true", value: 1 });
+    renderAssessPolicies();
+  });
+  assessPane().querySelectorAll("[data-pdel]").forEach((b) => b.addEventListener("click", () => {
+    harvestPolicyDraft();
+    POLICY_DRAFT.splice(Number(b.dataset.pdel), 1);
+    renderAssessPolicies();
+  }));
+  // Switching field type changes which operators make sense, so re-render.
+  assessPane().querySelectorAll('[data-pfield="path"]').forEach((s) => s.addEventListener("change", () => {
+    harvestPolicyDraft();
+    POLICY_DRAFT.forEach((r) => {
+      const t = FIELD_BY_PATH[r.path]?.type;
+      if (t === "bool" && !["true", "false"].includes(r.op)) r.op = "true";
+      if (t === "num" && ["true", "false"].includes(r.op)) r.op = "gte";
+    });
+    renderAssessPolicies();
+  }));
+  $("#policyCreate")?.addEventListener("click", createPolicy);
+  $("#policyEvaluate")?.addEventListener("click", evaluatePolicies);
+  assessPane().querySelectorAll("[data-ptoggle]").forEach((c) => c.addEventListener("change", () =>
+    togglePolicy(c.dataset.ptoggle, c.checked)));
+  assessPane().querySelectorAll("[data-pdelete]").forEach((b) => b.addEventListener("click", () =>
+    deletePolicy(b.dataset.pdelete)));
+}
+
+async function createPolicy() {
+  harvestPolicyDraft();
+  const name = $("#policyName").value.trim();
+  if (!name) { banner("Give the policy a name."); return; }
+  try {
+    const res = await fetch("/api/policies", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        project: PROJECT, name,
+        conditions: draftToConditions(),
+        action: $("#policyAction").value,
+        resultSeverity: $("#policySeverity").value,
+        message: $("#policyMessage").value.trim(),
+      }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { banner(d.error || "Could not create the policy."); return; }
+    banner("");
+    POLICY_DRAFT = [{ path: POLICY_FIELDS[0].path, op: "true", value: 1 }];
+    renderAssessPolicies();
+  } catch (e) { banner("Could not create the policy: " + e.message); }
+}
+
+async function togglePolicy(id, enabled) {
+  try {
+    const res = await fetch(`/api/policies/${encodeURIComponent(id)}/enabled`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ project: PROJECT, enabled }),
+    });
+    if (!res.ok) banner("Could not update the policy.");
+  } catch (e) { banner("Could not update the policy: " + e.message); }
+}
+
+async function deletePolicy(id) {
+  if (!confirm("Delete this policy? Past evaluations are not affected.")) return;
+  try {
+    const res = await fetch(`/api/policies/${encodeURIComponent(id)}?project=${encodeURIComponent(PROJECT)}`, { method: "DELETE" });
+    if (!res.ok) { banner("Could not delete the policy."); return; }
+    renderAssessPolicies();
+  } catch (e) { banner("Could not delete the policy: " + e.message); }
+}
+
+async function evaluatePolicies() {
+  const btn = $("#policyEvaluate");
+  btn.disabled = true; btn.textContent = "Checking…";
+  try {
+    const d = await api("/api/policies/evaluate");
+    const decisions = d.decisions || [];
+    const app = (d.context && d.context.application) || {};
+    const matched = decisions.filter((x) => x.matched);
+    $("#policyResult").innerHTML = `<div class="card" style="margin-top:calc(var(--u)*3)">
+      <div class="card-head"><span class="card-title">${matched.length ? `${num(matched.length)} of ${num(decisions.length)} policies match right now` : "No policies match right now"}</span></div>
+      <div class="pad" style="padding:calc(var(--u)*3);display:grid;gap:10px;font-size:12.5px">
+        ${decisions.length ? decisions.map((x) => `<div style="display:flex;gap:10px;align-items:flex-start">
+          ${x.matched ? pill(x.severity === "informational" ? "info" : x.severity) : '<span class="pill pill-neutral">ok</span>'}
+          <div><div style="color:var(--ink)">${esc(x.name)}</div>
+          <div class="dim" style="font-size:11.5px">${x.matched ? esc(x.message || titleCase(x.action)) : "not matching"}</div></div>
+        </div>`).join("") : '<div class="dim">No enabled policies to check.</div>'}
+        <details style="margin-top:6px"><summary style="cursor:pointer;font-size:12px">What Argus knows about this app</summary>
+          <div class="mono dim" style="font-size:11.5px;margin-top:8px;display:grid;gap:3px">
+            ${Object.keys(app).map((k) => `<span>${esc(titleCase(k))}: ${esc(String(app[k]))}</span>`).join("")}
+          </div>
+          <div class="dim" style="font-size:11.5px;margin-top:8px">These are the only facts a condition can test. Anything missing here can never match.</div>
+        </details>
+      </div>
+    </div>`;
+  } catch (e) {
+    banner("Could not check policies: " + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = "Check against this app now";
+  }
+}
+
 // ---------- Data governance (retention + erasure) ----------
 // Owner-only, and every control here destroys data, so the flow is: show the
 // current state, make the consequence explicit, require a second action.
@@ -1701,8 +1966,10 @@ function fillSettings(c, canEdit) {
   $("#setL2").checked = !!c.layers?.classifiers?.enabled;
   $("#setL4").checked = !!c.layers?.trace_analysis?.enabled;
   $("#setAlertSev").value = c.alerting?.min_severity || "high";
+  $("#setGwMode").value = c.gateway?.mode || "inherit";
+  $("#setGwThreshold").value = c.gateway?.block_threshold ?? 75;
   // Disable the editable controls for non-admins (L1/L3 stay disabled always).
-  ["setSample", "setRedact", "setL2", "setL4", "setAlertSev"].forEach((id) => { const el = $("#" + id); if (el) el.disabled = !canEdit; });
+  ["setSample", "setRedact", "setL2", "setL4", "setAlertSev", "setGwMode", "setGwThreshold"].forEach((id) => { const el = $("#" + id); if (el) el.disabled = !canEdit; });
 }
 
 $("#setSample")?.addEventListener("input", () => { $("#setSampleVal").textContent = $("#setSample").value + "%"; });
@@ -1718,6 +1985,10 @@ $("#saveSettingsBtn")?.addEventListener("click", async () => {
   cfg.layers.classifiers = { ...(cfg.layers.classifiers || {}), enabled: $("#setL2").checked };
   cfg.layers.trace_analysis = { ...(cfg.layers.trace_analysis || {}), enabled: $("#setL4").checked };
   cfg.alerting = { ...(cfg.alerting || {}), min_severity: $("#setAlertSev").value };
+  // block_categories is intentionally not exposed: the only honest choice is
+  // the built-in set, and mergeConfig drops anything else anyway. Preserved
+  // from the stored config so an API-set value survives a UI save.
+  cfg.gateway = { ...(cfg.gateway || {}), mode: $("#setGwMode").value, block_threshold: Number($("#setGwThreshold").value) };
   const btn = $("#saveSettingsBtn");
   btn.disabled = true; btn.textContent = "Saving…";
   try {

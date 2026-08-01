@@ -18,6 +18,7 @@ import { registerPublicApi } from "./publicRoutes.js";
 import * as Alerts from "./alertAdmin.js";
 import * as Assessments from "./assessments.js";
 import * as Synthesis from "./assessmentSynthesis.js";
+import * as Policies from "./policies.js";
 import { applySecurityHeaders } from "./headers.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -842,6 +843,63 @@ export async function buildApp() {
       } catch (err) { app.log.error({ err }, "finding status failed"); reply.code(500).send({ error: String(err) }); }
     },
   );
+
+  // ---------------- governance policies (view: member+, manage: member+) ----------------
+
+  guard("policies", (_r, p) => Policies.listPolicies(p).then((policies) => ({ policies })));
+
+  app.post<{ Body: { project?: string } & Policies.PolicyInput }>("/api/policies", async (req, reply) => {
+    const g = await roleGate(req, reply, req.body?.project, "member");
+    if (!g) return;
+    const invalid = Policies.validatePolicy(req.body!);
+    if (invalid) { reply.code(400).send({ error: invalid }); return; }
+    try {
+      const r = await Policies.createPolicy(req.body!.project!, req.body!, userOf(req)!.id);
+      if ("error" in r) { reply.code(400).send(r); return; }
+      audit(req, "policy.created", {
+        orgId: g.orgId, targetType: "policy", target: r.id,
+        metadata: { project: req.body?.project, policyKey: r.policy_key, action: r.action },
+      });
+      return r;
+    } catch (err) { app.log.error({ err }, "policy create failed"); reply.code(500).send({ error: String(err) }); }
+  });
+
+  app.post<{ Params: { id: string }; Body: { project?: string; enabled?: boolean } }>(
+    "/api/policies/:id/enabled",
+    async (req, reply) => {
+      const g = await roleGate(req, reply, req.body?.project, "member");
+      if (!g) return;
+      const ok = await Policies.setPolicyEnabled(req.body!.project!, req.params.id, !!req.body?.enabled);
+      if (!ok) { reply.code(404).send({ error: "policy not found" }); return; }
+      audit(req, "policy.toggled", {
+        orgId: g.orgId, targetType: "policy", target: req.params.id,
+        metadata: { project: req.body?.project, enabled: !!req.body?.enabled },
+      });
+      return { ok: true };
+    },
+  );
+
+  app.delete<{ Params: { id: string }; Querystring: ScopedQuery }>("/api/policies/:id", async (req, reply) => {
+    const g = await roleGate(req, reply, req.query.project, "member");
+    if (!g) return;
+    const ok = await Policies.deletePolicy(req.query.project!, req.params.id);
+    if (!ok) { reply.code(404).send({ error: "policy not found" }); return; }
+    audit(req, "policy.deleted", {
+      orgId: g.orgId, targetType: "policy", target: req.params.id,
+      metadata: { project: req.query.project },
+    });
+    return { ok: true };
+  });
+
+  // Read-only: reports what the rules say about the application right now.
+  // Never writes and never blocks on its own — the caller decides.
+  app.get("/api/policies/evaluate", async (req, reply) => {
+    const user = userOf(req)!;
+    const project = (req.query as ScopedQuery).project;
+    if (!project || (!user.isPlatformAdmin && !(await Auth.userCanAccessProject(user.id, project)))) { reply.code(403).send({ error: "forbidden" }); return; }
+    try { return await Policies.evaluatePolicies(project); }
+    catch (err) { app.log.error({ err }, "policy evaluate failed"); reply.code(503).send({ error: "policy engine unavailable" }); }
+  });
 
   // ---------------- platform admin (super-admin) ----------------
   // Every route here requires the platform-admin flag. This is the operator layer

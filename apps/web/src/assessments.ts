@@ -405,6 +405,82 @@ export async function listFindings(projectId: string, limit = 200): Promise<unkn
   return rows;
 }
 
+// ---------------- reports ----------------
+
+export const REPORT_KINDS = new Set(["executive", "technical", "governance"]);
+export const REPORT_FORMATS = new Set(["md", "json", "csv", "pdf"]);
+
+/**
+ * Gather this project's open findings and controls, hand them to the engine's
+ * renderer, and return the finished file.
+ *
+ * The rendering lives in the detection service so all four formats share one
+ * definition of what a report says (and one redaction backstop); this side owns
+ * only the data-gathering, which is where the tenancy is. Findings are limited
+ * to `open` on purpose — a report is a statement about outstanding risk, and
+ * padding it with things the team already resolved makes it useless for the
+ * conversation it exists to support.
+ */
+export async function renderReport(
+  projectId: string,
+  projectName: string,
+  kind: string,
+  format: string,
+): Promise<{ body: Buffer; contentType: string } | null> {
+  const safe = safeProjectId(projectId);
+  if (!safe || !REPORT_KINDS.has(kind) || !REPORT_FORMATS.has(format)) return null;
+
+  const [findings, controls] = await Promise.all([
+    pool.query(
+      `SELECT rule_id, title, category, severity, confidence, document_name,
+              explanation, evidence, recommendation, frameworks, mitigations,
+              observed_in_production, (risk->>'final_score')::int AS risk_score
+       FROM assessment_findings
+       WHERE project_id = $1 AND analyst_status = 'open'
+       ORDER BY created_at DESC LIMIT 500`,
+      [safe],
+    ),
+    pool.query(
+      `SELECT control_key, domain, objective, description, status, owner,
+              evidence, frameworks
+       FROM governance_controls WHERE project_id = $1 ORDER BY control_key`,
+      [safe],
+    ),
+  ]);
+
+  const coverage: Record<string, number> = {};
+  for (const c of controls.rows as { status: string }[]) {
+    coverage[c.status] = (coverage[c.status] ?? 0) + 1;
+  }
+  const overallRisk = (findings.rows as { risk_score: number | null }[])
+    .reduce((m, f) => Math.max(m, Number(f.risk_score ?? 0)), 0);
+
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (config.detectionApiKey) headers.authorization = `Bearer ${config.detectionApiKey}`;
+
+  const res = await fetch(`${config.detectionUrl}/v1/report`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      kind,
+      format,
+      data: {
+        project_name: projectName,
+        generated_at: new Date().toISOString(),
+        overall_risk: overallRisk,
+        coverage,
+        findings: findings.rows,
+        controls: controls.rows,
+      },
+    }),
+  });
+  if (!res.ok) throw new Error(`detection /v1/report ${res.status}`);
+  return {
+    body: Buffer.from(await res.arrayBuffer()),
+    contentType: res.headers.get("content-type") || "application/octet-stream",
+  };
+}
+
 const FINDING_STATUSES = new Set(["open", "resolved", "accepted"]);
 
 /** Scoped by (id AND project_id): the ACL validated the claimed project, so the

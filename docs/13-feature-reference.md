@@ -207,9 +207,20 @@ actually been recorded against the application in the last 30 days is badged
 so, and sorted to the top of the Findings view. Only likelihood moves — evidence
 of attempts says nothing about impact or exposure.
 
-Not yet ported from InjectGuard: policy *storage* (the evaluator is merged and
-callable), controls, and report generation. Policy-driven gateway blocking waits
-on that storage.
+**Governance: policies, controls, reports.** Two more tabs. **Policies** are
+rules about how the application may be built ("don't ship with an open
+critical") authored as conditions rather than JSON, checked on demand against
+what Argus can actually prove; a condition it cannot answer never matches, so a
+rule fails safe. **Controls** are the standing commitments an auditor asks about,
+with owner, status and review date — adopted explicitly from a 10-control
+baseline, never seeded behind your back. From there you can download
+**executive**, **technical** and **governance** reports as PDF, Markdown, CSV or
+JSON, built from open findings only and secret-redacted in every format.
+
+Per-project **gateway blocking** also lives in Settings now (mode + threshold),
+so enabling inline blocking for one application no longer enables it for every
+tenant sharing the proxy. A project can narrow what blocks but never widen it
+beyond what a single message with no trace context can judge.
 
 ---
 

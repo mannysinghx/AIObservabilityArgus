@@ -17,7 +17,8 @@ decommissioning the standalone InjectGuard deployment.
 | 2 | Tenanted storage + `/api/assess*` | `731b0ab` | ✅ shipped |
 | 3 | Dashboard UI — Assessments (Runs / Findings / Architecture) | `7e953a5` | ✅ shipped |
 | 4 | Synthesis: trace-derived graphs + runtime→risk feedback | see `git log` | ✅ shipped |
-| 4b | Policy storage + policy-driven gateway blocking | — | planned |
+| 4b | Governance policies + per-project gateway blocking | `c0fb690` | ✅ shipped |
+| 4c | Controls + report generation | see `git log` | ✅ shipped |
 | 5 | Decommission the standalone InjectGuard deployment | — | planned |
 
 ---
@@ -125,8 +126,25 @@ widen a policy. No LLM is ever consulted.
 | **Code** | [`assessment/policy.py`](../services/detection/argus_detection/assessment/policy.py) — `evaluate_conditions`, `evaluate_policy` |
 | **Engine API** | `POST /v1/assess/policy` |
 | **Operators** | `exists`, `in`, `gte`, `lte`, `gt`, `lt`, `matches`, plus scalar equality |
-| **UI / storage** | not yet — the evaluator merged, policy *storage* is Phase 2b/3 |
-| **Tests** | [`test_assessment_policy.py`](../services/detection/tests/test_assessment_policy.py) |
+| **Storage** | `assessment_policies` (migration `015_policies.sql`), [`apps/web/src/policies.ts`](../apps/web/src/policies.ts) |
+| **Dashboard API** | `GET/POST /api/policies`, `POST /api/policies/:id/enabled`, `DELETE /api/policies/:id`, `GET /api/policies/evaluate` |
+| **UI** | Assessments → Policies (condition builder, not raw JSON) |
+| **Tests** | [`test_assessment_policy.py`](../services/detection/tests/test_assessment_policy.py), `tests/integration/assessments.test.ts` |
+
+Policies judge slow-moving application state — architecture, open findings,
+approval posture — and their actions gate rather than block traffic (`warn`,
+`block_deployment`, `block_assessment_approval`). Evaluation is read-only.
+
+**Why the DSL does not drive the inline gateway.** The gateway sees one message
+with no trace context and a 300ms budget; the only variables that exist there
+are score, category and severity. Wiring the dotted-path evaluator in would mean
+a second implementation of it in TypeScript, and this codebase already treats
+duplicated logic as a drift risk (`taint.py` / `taint.ts`). Per-project gateway
+blocking is therefore structured config — `DetectionConfig.gateway`
+(mode/threshold/categories), merged and clamped like every other setting, with
+`inherit` as the default so nothing changes until a project opts in. A project
+can *narrow* its blockable categories but never widen them beyond what a single
+message can honestly support; see [`packages/shared/src/gateway.ts`](../packages/shared/src/gateway.ts).
 
 ### 6. Compliance framework registry
 
@@ -206,6 +224,47 @@ The list is derived server-side and **never accepted from the request** — a
 client-supplied value would let a caller inflate its own scores, or launder
 another tenant's telemetry into its assessment. The lookup is best-effort: a
 ClickHouse failure means the run scores on inference alone rather than failing.
+
+### 10. Governance controls
+
+The standing commitments an auditor asks about — "retrieved content is treated
+as untrusted", "writes need human approval" — with an owner, a status and a
+review date. Findings say what is wrong today; controls say what you have
+decided will always be true.
+
+| | |
+|---|---|
+| **Code** | [`apps/web/src/controls.ts`](../apps/web/src/controls.ts) — `CONTROL_CATALOG` (10 baseline controls), `adoptCatalog`, `updateControl`, `coverage` |
+| **Storage** | `governance_controls` (migration `016_controls.sql`), per project |
+| **Dashboard API** | `GET /api/controls`, `POST /api/controls/adopt`, `POST /api/controls/:id` |
+| **UI** | Assessments → Controls |
+
+One behaviour deliberately differs from InjectGuard: seeding the baseline there
+happened as a **side effect of listing controls**, so a plain GET wrote ten
+rows. Reads that mutate are how a page refresh becomes a data change and how a
+viewer ends up writing to the database — here adopting is an explicit action,
+and it is idempotent, so adopting again after the catalog grows adds only the
+new controls and never resets a status somebody set.
+
+### 11. Reports — executive, technical, governance
+
+| | |
+|---|---|
+| **Code** | [`assessment/report.py`](../services/detection/argus_detection/assessment/report.py) — renderers + the dependency-free PDF writer |
+| **Engine API** | `POST /v1/report` → returns the file, not JSON |
+| **Dashboard API** | `GET /api/reports/:kind?format=md\|json\|csv\|pdf` |
+| **UI** | Assessments → Controls → Reports |
+
+All four formats render in one place so there is a single definition of what a
+report says, and **every format — including the serialized JSON — passes through
+`redact_text` before it leaves**. A report is the artifact most likely to be
+emailed, pasted into a ticket or attached to an audit response, which makes it
+the worst possible place for a credential to survive. Reports are built from
+*open* findings only: a report is a statement about outstanding risk, and
+padding it with resolved items makes it useless for the conversation it exists
+to support. Findings are ordered worst-first, and within a severity the
+`observed_in_production` ones lead — a reader who stops after page one should
+have seen what matters.
 
 ---
 

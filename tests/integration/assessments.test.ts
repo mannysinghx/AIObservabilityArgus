@@ -313,6 +313,130 @@ describe("trace-derived architecture (Phase 4 synthesis)", () => {
   });
 });
 
+describe("governance surfaces are tenant-scoped", () => {
+  for (const path of ["policies", "controls"]) {
+    isoTest(`/api/${path} refuses another tenant's project`, async () => {
+      const res = await app.inject({
+        method: "GET", url: `/api/${path}?project=${B.projectId}`, headers: { cookie: A.cookie },
+      });
+      assert.equal(res.statusCode, 403);
+    });
+  }
+
+  isoTest("a control adopted by one tenant is invisible to the other", async () => {
+    const adopt = await app.inject({
+      method: "POST", url: "/api/controls/adopt",
+      headers: { cookie: A.cookie }, payload: { project: A.projectId },
+    });
+    assert.equal(adopt.statusCode, 200, adopt.body.slice(0, 200));
+
+    const mine = await app.inject({
+      method: "GET", url: `/api/controls?project=${A.projectId}`, headers: { cookie: A.cookie },
+    });
+    assert.ok((mine.json() as { controls: unknown[] }).controls.length > 0);
+
+    const theirs = await app.inject({
+      method: "GET", url: `/api/controls?project=${B.projectId}`, headers: { cookie: B.cookie },
+    });
+    assert.equal((theirs.json() as { controls: unknown[] }).controls.length, 0,
+      "adopting for A must not populate B");
+  });
+
+  isoTest("adopting is idempotent", async () => {
+    await app.inject({
+      method: "POST", url: "/api/controls/adopt",
+      headers: { cookie: A.cookie }, payload: { project: A.projectId },
+    });
+    const second = await app.inject({
+      method: "POST", url: "/api/controls/adopt",
+      headers: { cookie: A.cookie }, payload: { project: A.projectId },
+    });
+    assert.equal((second.json() as { added: number }).added, 0, "a re-adopt must add nothing");
+  });
+
+  isoTest("cannot update another tenant's control", async () => {
+    await app.inject({
+      method: "POST", url: "/api/controls/adopt",
+      headers: { cookie: B.cookie }, payload: { project: B.projectId },
+    });
+    const list = await app.inject({
+      method: "GET", url: `/api/controls?project=${B.projectId}`, headers: { cookie: B.cookie },
+    });
+    const victim = (list.json() as { controls: { id: string }[] }).controls[0];
+    // Authorize against A's own project, then hand over B's control id.
+    const res = await app.inject({
+      method: "POST", url: `/api/controls/${victim.id}`,
+      headers: { cookie: A.cookie }, payload: { project: A.projectId, status: "implemented" },
+    });
+    assert.equal(res.statusCode, 404);
+    const after = await pool.query<{ status: string }>(
+      "SELECT status FROM governance_controls WHERE id = $1", [victim.id],
+    );
+    assert.equal(after.rows[0].status, "not_implemented", "B's control must be untouched");
+  });
+
+  isoTest("a policy created by one tenant is invisible to the other", async () => {
+    const made = await app.inject({
+      method: "POST", url: "/api/policies", headers: { cookie: A.cookie },
+      payload: {
+        project: A.projectId, name: `no criticals ${A.secret}`,
+        conditions: { "application.open_critical_findings": { gte: 1 } },
+        action: "block_deployment",
+      },
+    });
+    assert.equal(made.statusCode, 200, made.body.slice(0, 200));
+    const theirs = await app.inject({
+      method: "GET", url: `/api/policies?project=${B.projectId}`, headers: { cookie: B.cookie },
+    });
+    assert.ok(!theirs.body.includes(A.secret));
+  });
+
+  isoTest("a policy with no conditions is refused", async () => {
+    // The evaluator treats an empty map as never-matching, so storing one would
+    // only create a rule that can never fire.
+    const res = await app.inject({
+      method: "POST", url: "/api/policies", headers: { cookie: A.cookie },
+      payload: { project: A.projectId, name: "empty", conditions: {} },
+    });
+    assert.equal(res.statusCode, 400);
+  });
+});
+
+describe("reports", () => {
+  isoTest("refuses another tenant's project", async () => {
+    const res = await app.inject({
+      method: "GET", url: `/api/reports/executive?project=${B.projectId}&format=md`,
+      headers: { cookie: A.cookie },
+    });
+    assert.equal(res.statusCode, 403);
+  });
+
+  isoTest("rejects an unknown kind or format", async () => {
+    const bad = await app.inject({
+      method: "GET", url: `/api/reports/nope?project=${A.projectId}&format=md`,
+      headers: { cookie: A.cookie },
+    });
+    assert.equal(bad.statusCode, 400);
+    const badFmt = await app.inject({
+      method: "GET", url: `/api/reports/executive?project=${A.projectId}&format=docx`,
+      headers: { cookie: A.cookie },
+    });
+    assert.equal(badFmt.statusCode, 400);
+  });
+
+  isoTest("renders a PDF for the caller's own project, without the other tenant's data", async function () {
+    if (!detectionUp) return; // rendering lives in the detection service
+    const res = await app.inject({
+      method: "GET", url: `/api/reports/technical?project=${A.projectId}&format=pdf`,
+      headers: { cookie: A.cookie },
+    });
+    assert.equal(res.statusCode, 200, res.body.slice(0, 200));
+    assert.ok(res.headers["content-disposition"]?.toString().includes("attachment"));
+    assert.ok(res.rawPayload.subarray(0, 8).toString().startsWith("%PDF-"), "must be a real PDF");
+    assert.ok(!res.rawPayload.toString("latin1").includes(B.secret), "leaked tenant B's data");
+  });
+});
+
 describe("live engine (skips when the detection service is down)", () => {
   isoTest("run → store → read back, scoped to the caller's project", async function () {
     if (!detectionUp) {

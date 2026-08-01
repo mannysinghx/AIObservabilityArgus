@@ -20,7 +20,8 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.responses import Response
 
 from . import __version__
 from .assessment import SCORING_VERSION
@@ -32,7 +33,9 @@ from .assessment.models import (
     AssessPolicyResponse,
     AssessPromptRequest,
     AssessPromptResponse,
+    ReportRequest,
 )
+from .assessment.report import render as render_report
 from .assessment.scanner import ALL_RULES
 from .auth import enabled as auth_enabled
 from .auth import require_api_key, warn_if_unprotected
@@ -107,3 +110,15 @@ def assess_graph_endpoint(req: AssessGraphRequest) -> AssessGraphResponse:
 )
 def assess_policy_endpoint(req: AssessPolicyRequest) -> AssessPolicyResponse:
     return assess_policy(req)
+
+
+@app.post("/v1/report", dependencies=[Depends(require_api_key)])
+def report_endpoint(req: ReportRequest) -> Response:
+    """Render a report. Returns the file itself, not JSON — the caller streams it
+    straight to a browser or an inbox, and base64-in-JSON would only add a
+    decode step on the way."""
+    try:
+        body, media_type = render_report(req.kind, req.format, req.data)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return Response(content=body, media_type=media_type)

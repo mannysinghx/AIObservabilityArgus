@@ -19,6 +19,7 @@ import * as Alerts from "./alertAdmin.js";
 import * as Assessments from "./assessments.js";
 import * as Synthesis from "./assessmentSynthesis.js";
 import * as Policies from "./policies.js";
+import * as Controls from "./controls.js";
 import { applySecurityHeaders } from "./headers.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -900,6 +901,79 @@ export async function buildApp() {
     try { return await Policies.evaluatePolicies(project); }
     catch (err) { app.log.error({ err }, "policy evaluate failed"); reply.code(503).send({ error: "policy engine unavailable" }); }
   });
+
+  // Reports. A GET so it can be a plain link/bookmark, and it streams the file
+  // itself rather than JSON — the point is something you can attach to an email
+  // or an audit response.
+  app.get<{ Params: { kind: string }; Querystring: ScopedQuery & { format?: string } }>(
+    "/api/reports/:kind",
+    async (req, reply) => {
+      const user = userOf(req)!;
+      const project = req.query.project;
+      if (!project || (!user.isPlatformAdmin && !(await Auth.userCanAccessProject(user.id, project)))) { reply.code(403).send({ error: "forbidden" }); return; }
+      const format = req.query.format || "md";
+      if (!Assessments.REPORT_KINDS.has(req.params.kind) || !Assessments.REPORT_FORMATS.has(format)) {
+        reply.code(400).send({ error: "unknown report kind or format" }); return;
+      }
+      try {
+        const meta = await Onboarding.getProjectMeta(project);
+        const out = await Assessments.renderReport(project, meta?.projectName || "Application", req.params.kind, format);
+        if (!out) { reply.code(400).send({ error: "could not render the report" }); return; }
+        audit(req, "report.generated", {
+          orgId: (await Auth.orgIdForProject(project)) || undefined,
+          targetType: "report", target: req.params.kind,
+          metadata: { project, kind: req.params.kind, format },
+        });
+        const ext = format === "md" ? "md" : format;
+        reply
+          .header("content-type", out.contentType)
+          .header("content-disposition", `attachment; filename="argus-${req.params.kind}-report.${ext}"`)
+          .send(out.body);
+      } catch (err) {
+        app.log.error({ err }, "report failed");
+        reply.code(503).send({ error: "report engine unavailable" });
+      }
+    },
+  );
+
+  // ---------------- governance controls (view: any role, manage: member+) ----------------
+
+  guard("controls", async (_r, p) => ({
+    controls: await Controls.listControls(p),
+    coverage: await Controls.coverage(p),
+    catalogSize: Controls.CONTROL_CATALOG.length,
+  }));
+
+  // Adopting the baseline is an explicit action, not a side effect of reading.
+  app.post<{ Body: { project?: string } }>("/api/controls/adopt", async (req, reply) => {
+    const g = await roleGate(req, reply, req.body?.project, "member");
+    if (!g) return;
+    try {
+      const added = await Controls.adoptCatalog(req.body!.project!, userOf(req)!.id);
+      audit(req, "controls.adopted", {
+        orgId: g.orgId, targetType: "controls", target: req.body!.project!,
+        metadata: { project: req.body?.project, added },
+      });
+      return { ok: true, added };
+    } catch (err) { app.log.error({ err }, "control adopt failed"); reply.code(500).send({ error: String(err) }); }
+  });
+
+  app.post<{ Params: { id: string }; Body: { project?: string } & Controls.ControlUpdate }>(
+    "/api/controls/:id",
+    async (req, reply) => {
+      const g = await roleGate(req, reply, req.body?.project, "member");
+      if (!g) return;
+      try {
+        const r = await Controls.updateControl(req.body!.project!, req.params.id, req.body!, userOf(req)!.id);
+        if ("error" in r) { reply.code(r.error === "control not found" ? 404 : 400).send(r); return; }
+        audit(req, "control.updated", {
+          orgId: g.orgId, targetType: "control", target: req.params.id,
+          metadata: { project: req.body?.project, status: req.body?.status },
+        });
+        return r;
+      } catch (err) { app.log.error({ err }, "control update failed"); reply.code(500).send({ error: String(err) }); }
+    },
+  );
 
   // ---------------- platform admin (super-admin) ----------------
   // Every route here requires the platform-admin flag. This is the operator layer

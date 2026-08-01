@@ -7,6 +7,7 @@ the wire — the parts a caller (Argus web tier) will actually depend on.
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from argus_detection.app import app
@@ -190,3 +191,76 @@ def test_assess_requires_key_when_configured(monkeypatch):
         headers={"Authorization": "Bearer s3cret"},
     )
     assert ok.status_code == 200
+
+
+# ── Reports ──────────────────────────────────────────────────────────────────
+
+REPORT_DATA = {
+    "project_name": "Acme Support Bot",
+    "generated_at": "2026-08-01T00:00:00Z",
+    "overall_risk": 95,
+    "coverage": {"implemented": 3, "not_implemented": 7},
+    "controls": [
+        {"control_key": "PE-1", "domain": "prompt_engineering", "objective": "Prompt separation",
+         "status": "implemented", "owner": "platform", "evidence": "see PR 412",
+         "frameworks": [{"framework": "OWASP-LLM", "requirement": "LLM01"}]},
+    ],
+    "findings": [
+        {"rule_id": "IG-PROMPT-009", "title": "Direct execution of model output",
+         "category": "unsafe-output", "severity": "critical", "confidence": "high",
+         "risk_score": 95, "observed_in_production": True, "document_name": "main",
+         "explanation": "Model output is executed.", "evidence": "api_key=sk-ABCD1234EFGH5678IJKL",
+         "recommendation": "Never execute model output.",
+         "frameworks": [{"framework": "OWASP-LLM", "requirement": "LLM02"}],
+         "mitigations": [{"title": "Output validation", "priority": "critical", "difficulty": "medium"}]},
+        {"rule_id": "IG-PROMPT-004", "title": "Contradictory instructions",
+         "category": "prompt-quality", "severity": "low", "risk_score": 20,
+         "observed_in_production": False, "evidence": "", "recommendation": ""},
+    ],
+}
+
+
+@pytest.mark.parametrize("kind", ["executive", "technical", "governance"])
+@pytest.mark.parametrize("fmt", ["md", "json", "csv", "pdf"])
+def test_report_renders_every_kind_and_format(monkeypatch, kind, fmt):
+    monkeypatch.delenv("DETECTION_API_KEY", raising=False)
+    res = client.post("/v1/report", json={"kind": kind, "format": fmt, "data": REPORT_DATA})
+    assert res.status_code == 200
+    assert res.content, "a report must never be empty"
+    if fmt == "pdf":
+        assert res.content.startswith(b"%PDF-1.4"), "must be a real PDF"
+        assert res.content.rstrip().endswith(b"%%EOF")
+
+
+def test_report_redacts_secrets_in_every_format(monkeypatch):
+    """The evidence excerpt carries a credential. A report is the artifact most
+    likely to be emailed or attached to an audit response, so no format may
+    leak it — including the serialized JSON."""
+    monkeypatch.delenv("DETECTION_API_KEY", raising=False)
+    for fmt in ("md", "json", "csv", "pdf"):
+        res = client.post("/v1/report", json={"kind": "technical", "format": fmt, "data": REPORT_DATA})
+        assert res.status_code == 200
+        assert b"sk-ABCD1234EFGH5678IJKL" not in res.content, f"{fmt} leaked the key"
+
+
+def test_report_puts_observed_findings_first(monkeypatch):
+    monkeypatch.delenv("DETECTION_API_KEY", raising=False)
+    res = client.post("/v1/report", json={"kind": "technical", "format": "md", "data": REPORT_DATA})
+    body = res.text
+    assert body.index("IG-PROMPT-009") < body.index("IG-PROMPT-004")
+
+
+def test_report_rejects_unknown_kind_and_format(monkeypatch):
+    monkeypatch.delenv("DETECTION_API_KEY", raising=False)
+    assert client.post("/v1/report", json={"kind": "nope", "format": "md"}).status_code == 400
+    assert client.post("/v1/report", json={"kind": "executive", "format": "docx"}).status_code == 400
+
+
+def test_report_handles_an_empty_application(monkeypatch):
+    """A project with nothing recorded must still produce a valid document
+    rather than an exception — 'nothing found' is a real result."""
+    monkeypatch.delenv("DETECTION_API_KEY", raising=False)
+    for kind in ("executive", "technical", "governance"):
+        res = client.post("/v1/report", json={"kind": kind, "format": "pdf", "data": {}})
+        assert res.status_code == 200
+        assert res.content.startswith(b"%PDF-1.4")

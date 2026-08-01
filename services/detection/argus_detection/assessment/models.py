@@ -159,3 +159,13 @@ class AssessPolicyResponse(BaseModel):
     action: str
     severity: str
     message: str | None = None
+
+
+class ReportRequest(BaseModel):
+    """Render a report from data the caller has already gathered. This service
+    owns no database, so the findings/controls arrive in the request; it owns
+    the wording, the ordering, and the redaction backstop."""
+
+    kind: str = "executive"        # executive | technical | governance
+    format: str = "md"            # md | json | csv | pdf
+    data: dict = Field(default_factory=dict)

@@ -855,6 +855,7 @@ function renderAssessTab() {
   if (ASSESS_TAB === "findings") return renderAssessFindings();
   if (ASSESS_TAB === "arch") return renderAssessArch();
   if (ASSESS_TAB === "policies") return renderAssessPolicies();
+  if (ASSESS_TAB === "controls") return renderAssessControls();
   return renderAssessRuns();
 }
 
@@ -1588,6 +1589,139 @@ async function evaluatePolicies() {
   } finally {
     btn.disabled = false; btn.textContent = "Check against this app now";
   }
+}
+
+// ---- Controls tab ---------------------------------------------------------
+// Findings say what is wrong today; controls are the commitments you've made
+// and will be asked to evidence. Status changes stamp last_reviewed_at server
+// side, so "when did anyone last look at this?" has an answer.
+const CONTROL_STATUS_LABELS = [
+  ["not_implemented", "Not implemented"],
+  ["in_progress", "In progress"],
+  ["implemented", "Implemented"],
+  ["not_applicable", "Not applicable"],
+];
+
+/**
+ * Report downloads. Plain links rather than fetch-and-blob: the endpoint sets
+ * Content-Disposition, so the browser's own download handling is both simpler
+ * and better behaved than anything reimplemented here.
+ */
+function reportLinksHtml() {
+  const kinds = [
+    ["executive", "Executive summary", "For someone who needs the position in one page."],
+    ["technical", "Technical findings", "Every open finding with evidence and fixes."],
+    ["governance", "Governance report", "Controls, ownership and outstanding risk."],
+  ];
+  const link = (kind, fmt, label) =>
+    `<a class="btn" href="/api/reports/${kind}?project=${encodeURIComponent(PROJECT)}&format=${fmt}" style="padding:4px 10px;font-size:11.5px;text-decoration:none">${esc(label)}</a>`;
+  return `<div class="card" style="margin-top:calc(var(--u)*3)">
+    <div class="card-head"><span class="card-title">Reports</span></div>
+    <div class="pad" style="padding:calc(var(--u)*3);display:grid;gap:calc(var(--u)*2.5);font-size:12.5px">
+      <div class="dim">Built from this application's <b>open</b> findings and its controls — a report is a statement about outstanding risk, so resolved items are left out. Secrets are stripped from every format.</div>
+      ${kinds.map(([k, title, blurb]) => `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <div style="flex:1;min-width:220px"><div style="color:var(--ink)">${esc(title)}</div><div class="dim" style="font-size:11.5px">${esc(blurb)}</div></div>
+        ${link(k, "pdf", "PDF")}${link(k, "md", "Markdown")}${link(k, "csv", "CSV")}${link(k, "json", "JSON")}
+      </div>`).join("")}
+    </div>
+  </div>`;
+}
+
+async function renderAssessControls() {
+  assessLoading();
+  try {
+    const d = await api("/api/controls");
+    const rows = d.controls || [];
+    if (!rows.length) {
+      assessPane().innerHTML = `<div class="card"><div class="empty-cta">
+        <div class="big">No controls adopted yet</div>
+        <p>A control is a commitment you intend to hold — "retrieved content is treated as untrusted", "writes need human approval" — with an owner and a review date. Argus ships a baseline of ${num(d.catalogSize || 0)} covering the domains that matter for an LLM application, each mapped to the framework requirement an auditor will cite.</p>
+        <p>Adopting copies them into this application so you can set status and ownership per control. Nothing is adopted automatically — that would be Argus deciding what your team has committed to.</p>
+        ${assessCanWrite() ? '<button class="btn btn-primary" id="controlsAdopt" type="button">Adopt the baseline</button>' : '<p class="dim">Adopting needs the <b>member</b> role.</p>'}
+      </div></div>` + reportLinksHtml();
+      $("#controlsAdopt")?.addEventListener("click", adoptControls);
+      return;
+    }
+    const cov = d.coverage || {};
+    const total = Object.values(cov).reduce((a, b) => a + Number(b), 0) || rows.length;
+    const done = Number(cov.implemented || 0);
+    const na = Number(cov.not_applicable || 0);
+    // "Not applicable" is a decision, not a gap, so it counts toward a settled
+    // position — but it is shown separately so nobody games coverage with it.
+    assessPane().innerHTML = `<div class="card">
+      <div class="card-head" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+        <span class="card-title">${num(done)} of ${num(total)} implemented${na ? ` · ${num(na)} not applicable` : ""}</span>
+        ${assessCanWrite() && rows.length < (d.catalogSize || 0) ? '<button class="btn" id="controlsAdopt" type="button" style="padding:6px 12px;font-size:12px">Add new baseline controls</button>' : ""}
+      </div>
+      <div class="tablewrap"><table class="feed"><tbody>
+        <tr><th>Control</th><th>Domain</th><th>Status</th><th>Owner</th><th>Evidence</th><th>Reviewed</th></tr>
+        ${rows.map((c) => `<tr class="evt">
+          <td><span class="mono dim" style="font-size:11px">${esc(c.control_key)}</span> ${esc(c.objective)}
+            <div class="dim" style="font-size:11px">${esc(c.description)}</div>
+            ${(c.frameworks || []).length ? `<div class="dim" style="font-size:10.5px;margin-top:2px">${(c.frameworks || []).map((f) => esc(`${f.framework} ${f.requirement}`)).join(" · ")}</div>` : ""}
+          </td>
+          <td class="dim">${esc(titleCase(c.domain))}</td>
+          <td>${assessCanWrite()
+            ? `<select data-cstatus="${esc(c.id)}" style="${assessInput}">${CONTROL_STATUS_LABELS.map(([v, l]) => `<option value="${esc(v)}"${v === c.status ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>`
+            : esc(titleCase(c.status))}</td>
+          <td>${assessCanWrite()
+            ? `<input type="text" data-cowner="${esc(c.id)}" value="${esc(c.owner)}" placeholder="who owns it" style="${assessInput};width:130px">`
+            : esc(c.owner || "—")}</td>
+          <td>${assessCanWrite()
+            ? `<input type="text" data-cevidence="${esc(c.id)}" value="${esc(c.evidence)}" placeholder="link or note" style="${assessInput};width:160px">`
+            : esc(c.evidence || "—")}</td>
+          <td class="mono dim" style="font-size:11px">${c.last_reviewed_at ? esc(ago(c.last_reviewed_at)) : "never"}</td>
+        </tr>`).join("")}
+      </tbody></table></div>
+      <div class="pad dim" style="padding:0 calc(var(--u)*3) calc(var(--u)*3);font-size:11.5px">Changes save as you make them. Setting a status stamps the review date.</div>
+    </div>` + reportLinksHtml();
+    wireAssessControls();
+  } catch (e) { assessError(e); }
+}
+
+function wireAssessControls() {
+  $("#controlsAdopt")?.addEventListener("click", adoptControls);
+  const save = (id, patch) => saveControl(id, patch);
+  assessPane().querySelectorAll("[data-cstatus]").forEach((s) =>
+    s.addEventListener("change", () => save(s.dataset.cstatus, { status: s.value })));
+  // Owner/evidence save on blur rather than per keystroke — a request per
+  // character would be silly, and blur is when the user has finished thinking.
+  assessPane().querySelectorAll("[data-cowner]").forEach((i) =>
+    i.addEventListener("blur", () => save(i.dataset.cowner, { owner: i.value })));
+  assessPane().querySelectorAll("[data-cevidence]").forEach((i) =>
+    i.addEventListener("blur", () => save(i.dataset.cevidence, { evidence: i.value })));
+}
+
+async function adoptControls() {
+  const btn = $("#controlsAdopt");
+  if (btn) { btn.disabled = true; btn.textContent = "Adopting…"; }
+  try {
+    const res = await fetch("/api/controls/adopt", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ project: PROJECT }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { banner(d.error || "Could not adopt the baseline."); return; }
+    banner("");
+    renderAssessControls();
+  } catch (e) {
+    banner("Could not adopt the baseline: " + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Adopt the baseline"; }
+  }
+}
+
+async function saveControl(id, patch) {
+  try {
+    const res = await fetch(`/api/controls/${encodeURIComponent(id)}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ project: PROJECT, ...patch }),
+    });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); banner(d.error || "Could not save the control."); return; }
+    banner("");
+  } catch (e) { banner("Could not save the control: " + e.message); }
 }
 
 // ---------- Data governance (retention + erasure) ----------

@@ -2,12 +2,14 @@
 
 # 🛡️ Argus
 
-### Security-first AI observability for LLM applications
+### AI security: runtime detection + pre-deployment assessment, in one platform
 
-**Langfuse-style tracing + a prompt-injection detection engine that actually understands your traces.**
+**Langfuse-style tracing with cross-span injection detection, fused with a static
+prompt/architecture assessment engine — so what your app actually does and how
+it's built inform each other.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-informational.svg)](#license)
-[![Status: Phase 1](https://img.shields.io/badge/status-Phase%201%20verified-brightgreen.svg)](#project-status)
+[![Status: merged](https://img.shields.io/badge/status-runtime%20%2B%20assessment%20merged-brightgreen.svg)](#project-status)
 [![OTel GenAI](https://img.shields.io/badge/OpenTelemetry-GenAI%20conventions-blueviolet.svg)](https://opentelemetry.io/docs/specs/semconv/gen-ai/)
 [![Python](https://img.shields.io/badge/python-3.10+-3776AB.svg?logo=python&logoColor=white)](services/detection)
 [![TypeScript](https://img.shields.io/badge/typescript-5.5-3178C6.svg?logo=typescript&logoColor=white)](apps)
@@ -16,12 +18,15 @@
 
 ---
 
-Argus is an open-source AI observability platform in the spirit of
-[Langfuse](https://github.com/langfuse/langfuse), with one deliberate
-difference: **LLM security is a first-class citizen, not an add-on.** Every
-trace is analyzed for prompt injection, **indirect** prompt injection,
-jailbreaks, data exfiltration, and anomalous agent behavior — with the full
-trace context you need to actually investigate an incident.
+Argus answers two different questions about an LLM application, in one product:
+**is it being attacked right now** (runtime observability + detection), and
+**could it be attacked, and can I prove I've reduced that risk** (static
+prompt/architecture assessment). Every trace is analyzed for prompt injection,
+**indirect** prompt injection, jailbreaks, data exfiltration, and anomalous
+agent behavior; every prompt template and architecture graph is analyzed for
+the weaknesses that make those attacks possible in the first place — and the
+two inform each other (see [Static assessment](#static-assessment--is-this-application-built-safely)
+below). Full plain-language overview: [docs/00 — What Argus Is](docs/00-what-is-argus.md).
 
 > **Codename "Argus"** — the hundred-eyed watchman of Greek myth. Rename freely.
 
@@ -35,7 +40,10 @@ poisoned document gets retrieved, the agent reads it, and three steps later it
 emails your data to an attacker. You can only catch that if you can see the
 whole trace: what the model read, what it did next, and whether its behavior
 changed after ingesting untrusted content. **That's exactly the data an
-observability platform already owns.** Argus fuses the two.
+observability platform already owns.** Argus fuses the two — and then goes
+one step further: a second engine judges the application's prompts and
+architecture *before* any of that traffic exists, and the two share evidence
+(see below).
 
 ## Why it's different
 
@@ -47,6 +55,46 @@ observability platform already owns.** Argus fuses the two.
 | Taint tracking through the trace graph | ❌ | ❌ | ✅ |
 | Security incidents rendered over traces | ❌ | ❌ | ✅ |
 | Continuous red-team regression | ❌ | ❌ | ✅ |
+| **Static prompt/architecture assessment** | ❌ | ❌ | ✅ |
+| **Runtime evidence feeding the risk score** | ❌ | ❌ | ✅ |
+
+## Static assessment — is this application *built* safely?
+
+Everything above judges live traffic. This half — absorbed whole from a
+companion product (InjectGuard) — judges the application *as built*, before an
+attacker sends anything:
+
+- **A 20-rule deterministic prompt scanner** — instruction/data mixing,
+  secrets in prompts, model-controlled authorization, direct execution of
+  model output, tool-definition injection, and more.
+- **An architecture graph analyzer** that reasons about topology, not
+  wording: untrusted input reaching a trusted component, model output
+  reaching an interpreter, a write-capable tool with no human-approval gate.
+- **A transparent, versioned 5-factor risk score** — every number carries its
+  factors and a written rationale, and is fully recomputable later.
+- **A ranked mitigation catalog**, a **policy engine** for governance rules
+  ("don't ship with an open critical finding"), **controls** tracking
+  (owner, status, review cadence), and downloadable **executive / technical /
+  governance reports** (PDF/Markdown/CSV/JSON, secret-redacted in every
+  format).
+
+All of it lives under one **Assessments** page (Architecture / Runs / Findings
+/ Policies / Controls). Full detail: [docs/14 — Merged Features](docs/14-merged-features.md).
+
+**The two halves share evidence, which is the actual point of merging them:**
+Argus can *propose* an application's architecture graph from observed traces
+instead of asking someone to draw it by hand (it deliberately won't guess
+whether a write needs human approval — no trace proves that, so a person
+confirms it) — and any static finding whose attack class Argus has *actually
+recorded* being attempted in production gets marked **"seen in production"**
+and scored at maximum likelihood. That's the difference between "this could be
+exploited" and "someone is already trying."
+
+A **Browser Guard extension** rounds this out — the one piece that protects a
+person rather than an application. It scans what someone is about to paste
+into ChatGPT, Claude, Gemini and similar tools locally, in the browser, before
+it's sent, and can optionally report the verdict (never the prompt text) back
+into Argus as an ordinary trace.
 
 ## See it work
 
@@ -176,18 +224,28 @@ to kill this kind of product is false positives, not missed attacks.
 ## Project structure
 
 ```
-apps/ingest         TS ingestion API — OTLP/HTTP JSON + native/Langfuse batch
+apps/ingest         TS ingestion API — OTLP/HTTP JSON + native/Langfuse batch + Browser Guard reports
 apps/worker         TS trace worker (→ ClickHouse) + security worker (→ detection)
-apps/web            TS dashboard — Threat Center, Traces, trace waterfall, Analytics
+apps/web            TS dashboard — Threat Center, Traces, trace waterfall, Analytics, Assessments
+apps/gateway        TS OpenAI-compatible inline blocking proxy
+apps/extension      Browser Guard — MV3 extension, local prompt scanning (see its README)
 services/detection  Python detection pipeline (L1–L4) + corpus + quality gate
-                    └ assessment/  static assessment engine (see docs/14)
-packages/shared     TS types, config, ClickHouse/Redis clients, GenAI mapping
+                    └ assessment/  static assessment engine (scanner/risk/policy/graph/reports)
+packages/shared     TS types, config, ClickHouse/Redis clients, GenAI mapping, prompt-event mapping
 deploy/             docker-compose + ClickHouse/Postgres migrations
 demo/               end-to-end poisoned-trace demo
-docs/               design docs 01–14 (vision, architecture, detection, UI spec…)
+docs/               design docs 00–14 (overview, vision, architecture, detection, UI spec…)
 ```
 
 ## Project status
+
+**The InjectGuard merge is complete.** A companion static-assessment product
+was absorbed whole: engines, tenanted storage, a five-tab Assessments UI,
+runtime↔static synthesis, governance (policies/controls/reports), and the
+Browser Guard extension all shipped and are live. The standalone deployment it
+came from has been decommissioned; its source is kept as a reference
+implementation for the two pieces not yet ported (see
+[docs/14](docs/14-merged-features.md) for what those are and why).
 
 **Phase 1 (Security Sidecar) — implemented and verified end-to-end.**
 
@@ -216,6 +274,7 @@ See [docs/06-roadmap.md](docs/06-roadmap.md) for the full plan.
 
 | Doc | Contents |
 |---|---|
+| [00 — What Argus Is](docs/00-what-is-argus.md) | **Start here** — plain-language overview of both halves and how they connect |
 | [01 — Vision & Scope](docs/01-vision-and-scope.md) | Problem, differentiators, target users, non-goals |
 | [02 — Architecture](docs/02-architecture.md) | Components, data flow, deployment modes |
 | [03 — Tech Stack](docs/03-tech-stack.md) | Open-source foundations + rationale (incl. build-vs-fork-Langfuse) |

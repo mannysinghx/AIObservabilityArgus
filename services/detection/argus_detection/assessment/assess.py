@@ -9,10 +9,13 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
+from . import blastradius as blastradiusmod
 from . import graph as graphmod
 from . import taxonomy
 from .mitigations import AppFacts, rank_mitigations
 from .models import (
+    AssessBlastRadiusRequest,
+    AssessBlastRadiusResponse,
     AssessContext,
     AssessFinding,
     AssessGraphRequest,
@@ -21,6 +24,7 @@ from .models import (
     AssessPolicyResponse,
     AssessPromptRequest,
     AssessPromptResponse,
+    BlastRadiusHopOut,
     GraphInsightOut,
     MitigationRec,
     RiskBreakdown,
@@ -188,6 +192,50 @@ def assess_graph(req: AssessGraphRequest) -> AssessGraphResponse:
         insight_count=len(insights),
         max_severity=_worst([i.severity for i in insights]),
         insights=insights,
+    )
+
+
+def assess_blast_radius(req: AssessBlastRadiusRequest) -> AssessBlastRadiusResponse:
+    nodes = [
+        graphmod.GraphNode(
+            id=n.id,
+            label=n.label,
+            node_type=n.node_type,
+            trust_level=n.trust_level,
+            can_write=n.can_write,
+            requires_approval=n.requires_approval,
+            attributes=n.attributes,
+        )
+        for n in req.nodes
+    ]
+    edges = [
+        graphmod.GraphEdge(
+            source_id=e.source,
+            target_id=e.target,
+            edge_type=e.edge_type,
+            tenant_boundary=e.tenant_boundary,
+            name=e.name,
+        )
+        for e in req.edges
+    ]
+    result = blastradiusmod.compute_blast_radius(nodes, edges, req.from_node_id)
+    return AssessBlastRadiusResponse(
+        project_id=req.project_id,
+        from_node_id=result.from_node_id,
+        from_label=result.from_label,
+        sink_count=len(result.reachable_sinks),
+        reachable_sinks=[
+            BlastRadiusHopOut(
+                node_id=h.node_id,
+                label=h.label,
+                sink_kinds=list(h.sink_kinds),
+                hops=h.hops,
+                path=list(h.path),
+                gated=h.gated,
+            )
+            for h in result.reachable_sinks
+        ],
+        truncated=result.truncated,
     )
 
 

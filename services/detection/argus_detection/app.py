@@ -6,6 +6,7 @@ Endpoints:
   POST /v1/scan/trace       scan a completed trace (L4 behavioral analysis)
   POST /v1/assess/prompt    static prompt assessment (rules + risk + mitigations)
   POST /v1/assess/graph     architecture-graph trust-boundary analysis
+  POST /v1/assess/blast-radius  reachability walk from a graph component
   POST /v1/assess/policy    deterministic policy evaluation
 
 The security worker (apps/worker) calls the scan endpoints per-event; the web
@@ -25,8 +26,10 @@ from fastapi.responses import Response
 
 from . import __version__
 from .assessment import SCORING_VERSION
-from .assessment.assess import assess_graph, assess_policy, assess_prompts
+from .assessment.assess import assess_blast_radius, assess_graph, assess_policy, assess_prompts
 from .assessment.models import (
+    AssessBlastRadiusRequest,
+    AssessBlastRadiusResponse,
     AssessGraphRequest,
     AssessGraphResponse,
     AssessPolicyRequest,
@@ -110,6 +113,15 @@ def assess_graph_endpoint(req: AssessGraphRequest) -> AssessGraphResponse:
 )
 def assess_policy_endpoint(req: AssessPolicyRequest) -> AssessPolicyResponse:
     return assess_policy(req)
+
+
+@app.post(
+    "/v1/assess/blast-radius",
+    response_model=AssessBlastRadiusResponse,
+    dependencies=[Depends(require_api_key)],
+)
+def assess_blast_radius_endpoint(req: AssessBlastRadiusRequest) -> AssessBlastRadiusResponse:
+    return assess_blast_radius(req)
 
 
 @app.post("/v1/report", dependencies=[Depends(require_api_key)])

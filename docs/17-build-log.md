@@ -31,7 +31,7 @@ traffic.
 
 | # | Feature | Proposal | Status | Source | Tests |
 |---|---|---|---|---|---|
-| 1 | Blast-radius reachability analysis | [Idea 5](15-platform-evolution-proposals.md#5-blast-radius--business-risk-simulator) | 🧪 Engine only | [`blastradius.py`](../services/detection/argus_detection/assessment/blastradius.py) | [`test_assessment_blastradius.py`](../services/detection/tests/test_assessment_blastradius.py) |
+| 1 | Blast-radius reachability analysis | [Idea 5](15-platform-evolution-proposals.md#5-blast-radius--business-risk-simulator) | 🔌 Wired — engine + `/v1/assess/blast-radius` + report section | [`blastradius.py`](../services/detection/argus_detection/assessment/blastradius.py) | [`test_assessment_blastradius.py`](../services/detection/tests/test_assessment_blastradius.py), [`test_assessment_api.py`](../services/detection/tests/test_assessment_api.py) |
 | 2 | Canary coverage reporting | [Idea 4, phase 1](15-platform-evolution-proposals.md#4-automated-canary-fleet--coverage-reporting) | 🧪 Engine only | [`canaryCoverage.ts`](../apps/web/src/canaryCoverage.ts) | [`canaryCoverage.test.ts`](../tests/canaryCoverage.test.ts) |
 | 3 | Query-intent DSL + compiler | [Idea 6, phase 1](15-platform-evolution-proposals.md#6-natural-language-query-copilot-over-trace--finding-storage) | 🧪 Engine only | [`queryIntent.ts`](../apps/web/src/queryIntent.ts) | [`queryIntent.test.ts`](../tests/queryIntent.test.ts) |
 | 4 | Gateway session risk tracking | [Idea 3, observe-only](15-platform-evolution-proposals.md#3-session-level-gateway-circuit-breaker) | 🧪 Engine only | [`sessionRisk.ts`](../apps/gateway/src/sessionRisk.ts) | [`gatewaySessionRisk.test.ts`](../tests/gatewaySessionRisk.test.ts) |
@@ -50,12 +50,37 @@ hops away, and whether an approval gate sits on the path.
 
 **Where to find it.**
 - Engine: [`services/detection/argus_detection/assessment/blastradius.py`](../services/detection/argus_detection/assessment/blastradius.py) — `compute_blast_radius()`, `blast_radius_for_insight()`
-- Tests: [`services/detection/tests/test_assessment_blastradius.py`](../services/detection/tests/test_assessment_blastradius.py) (17 tests)
+- Wire-level: `POST /v1/assess/blast-radius` on the detection service ([`app.py`](../services/detection/argus_detection/app.py) + [`assess.py`](../services/detection/argus_detection/assessment/assess.py))
+- Report rendering: [`report.py`](../services/detection/argus_detection/assessment/report.py)'s `_blast_radius_lines()` — a new "BLAST RADIUS" section in executive and technical reports (all four formats: md/json/csv-excluded/pdf; deliberately not in governance reports, and not in CSV since it doesn't fit that format's flat-table shape)
+- Web-tier gathering: [`assessments.ts`](../apps/web/src/assessments.ts)'s `computeBlastRadiusEntries()` — walks the stored graph's top 5 highest-severity insights and folds the results into `renderReport()`'s existing `/v1/report` call. Best-effort: never throws, so a missing/unreachable graph degrades the report rather than failing it.
+- Tests: [`test_assessment_blastradius.py`](../services/detection/tests/test_assessment_blastradius.py) (17), plus new coverage in [`test_assessment_api.py`](../services/detection/tests/test_assessment_api.py) (route contract + report-section presence/absence/redaction)
 
-**What's NOT there yet.** No report section, no API endpoint
-(`POST /api/assessment/graph/blast-radius` from doc 15 doesn't exist), no UI.
-Doc 15's own phasing calls for wiring into `report.py`'s existing renderers
-next, then the ad-hoc query endpoint.
+**A real pre-existing bug was found and fixed along the way.** Wiring the
+JSON report format exposed that `redaction.py`'s secret-pattern regex used a
+bare `\S+` for the captured value, which — when a secret-shaped string sat
+right before a JSON string's closing quote — consumed that quote too and
+corrupted the JSON. Not a blast-radius bug: any `/v1/report` caller
+requesting `format=json` with a secret-shaped evidence value already hit
+this. Fixed in `redaction.py`, regression-tested in
+[`test_assessment_redaction.py`](../services/detection/tests/test_assessment_redaction.py)
+(new file, 5 tests).
+
+**What's NOT there yet.** The ad-hoc "what's reachable from node X" query
+endpoint (`POST /api/assessment/graph/blast-radius`) and its UI in the
+Architecture tab — doc 15's phase 3. Reports are the only place this
+currently surfaces, and reports are reached the same way every other Argus
+report already is (Assessments → Controls → Reports), so no new UI screen
+was needed for this increment.
+
+**Not verified against live infrastructure in this session.** The Python
+side (engine, route, report rendering, redaction fix) has full automated
+test coverage (162 detection-service tests, all passing). The web-tier
+gathering function (`computeBlastRadiusEntries`) type-checks cleanly and
+reuses already-proven call patterns from the same file, but — like the rest
+of `assessments.ts` — it has no root-level unit test of its own; it's only
+exercisable against a live Postgres + running detection service
+(`tests/integration/assessments.test.ts`, needs `make up`), which wasn't
+running in this session.
 
 **Try it yourself**
 ```python
@@ -73,6 +98,17 @@ edges = [
 ]
 result = compute_blast_radius(nodes, edges, "user")
 # result.reachable_sinks -> [BlastRadiusHop(node_id='db', sink_kinds=('sensitive_data',), hops=2, ...)]
+```
+
+Or over HTTP, once the detection service is running:
+```bash
+curl -s localhost:8000/v1/assess/blast-radius -X POST -H 'content-type: application/json' -d '{
+  "nodes": [{"id":"user","trust_level":"untrusted"},{"id":"agent","node_type":"model"},
+            {"id":"db","attributes":{"has_sensitive_data":true}}],
+  "edges": [{"source":"user","target":"agent","edge_type":"sends_prompt"},
+            {"source":"agent","target":"db","edge_type":"reads_data"}],
+  "from_node_id": "user"
+}'
 ```
 
 ---

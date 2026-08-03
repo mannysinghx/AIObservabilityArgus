@@ -147,6 +147,35 @@ class AssessGraphResponse(BaseModel):
     insights: list[GraphInsightOut] = Field(default_factory=list)
 
 
+class AssessBlastRadiusRequest(BaseModel):
+    """docs/15 §5. Same graph shape as AssessGraphRequest, plus the component
+    to walk forward from — typically the untrusted component named by a
+    GraphInsight the caller already has from /v1/assess/graph."""
+
+    project_id: str = "default"
+    nodes: list[GraphNodeIn]
+    edges: list[GraphEdgeIn] = Field(default_factory=list)
+    from_node_id: str
+
+
+class BlastRadiusHopOut(BaseModel):
+    node_id: str
+    label: str
+    sink_kinds: list[str] = Field(default_factory=list)
+    hops: int
+    path: list[str] = Field(default_factory=list)
+    gated: bool
+
+
+class AssessBlastRadiusResponse(BaseModel):
+    project_id: str
+    from_node_id: str
+    from_label: str
+    sink_count: int
+    reachable_sinks: list[BlastRadiusHopOut] = Field(default_factory=list)
+    truncated: bool
+
+
 class AssessPolicyRequest(BaseModel):
     project_id: str = "default"
     policy: dict

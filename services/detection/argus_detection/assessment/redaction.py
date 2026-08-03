@@ -23,7 +23,12 @@ _PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"AKIA[0-9A-Z]{16}"),                         # AWS access key id
     re.compile(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"),  # JWT
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"),
-    re.compile(r"(?i)\b(password|passwd|secret|api[_-]?key|token)\b\s*[:=]\s*\S+"),
+    # The value is "not whitespace and not a structural character a serialized
+    # form would put right after it" rather than a bare \S+. A bare \S+ against
+    # a JSON-serialized string (e.g. `"evidence": "api_key=sk-XXXX"`) consumes
+    # the closing quote along with the secret, corrupting the JSON — found via
+    # a report rendered in json format, not by inspection.
+    re.compile(r"(?i)\b(password|passwd|secret|api[_-]?key|token)\b\s*[:=]\s*[^\s\"',}\]]+"),
 ]
 
 # Structured-payload field names whose values are always redacted.

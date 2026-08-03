@@ -112,6 +112,60 @@ def test_assess_graph_flags_and_maps():
     assert rules["untrusted_to_trusted_instruction"]["argus_category"] == "indirect_injection"
 
 
+def test_assess_blast_radius_finds_a_reachable_sink():
+    res = client.post(
+        "/v1/assess/blast-radius",
+        json={
+            "project_id": "p1",
+            "nodes": [
+                {"id": "u", "label": "User", "node_type": "user", "trust_level": "untrusted"},
+                {"id": "m", "label": "Agent", "node_type": "model"},
+                {
+                    "id": "db", "label": "Customer DB", "node_type": "other",
+                    "attributes": {"has_sensitive_data": True},
+                },
+            ],
+            "edges": [
+                {"source": "u", "target": "m", "edge_type": "sends_prompt"},
+                {"source": "m", "target": "db", "edge_type": "reads_data"},
+            ],
+            "from_node_id": "u",
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["project_id"] == "p1"
+    assert body["from_node_id"] == "u"
+    assert body["sink_count"] == 1
+    sink = body["reachable_sinks"][0]
+    assert sink["node_id"] == "db"
+    assert sink["hops"] == 2
+    assert "sensitive_data" in sink["sink_kinds"]
+    assert sink["gated"] is False
+    assert body["truncated"] is False
+
+
+def test_assess_blast_radius_missing_start_node_returns_empty_not_an_error():
+    res = client.post(
+        "/v1/assess/blast-radius",
+        json={"nodes": [{"id": "a"}], "edges": [], "from_node_id": "does-not-exist"},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["sink_count"] == 0
+    assert body["reachable_sinks"] == []
+
+
+def test_assess_blast_radius_requires_key_when_configured(monkeypatch):
+    monkeypatch.setenv("DETECTION_API_KEY", "s3cret")
+    payload = {"nodes": [{"id": "a"}], "edges": [], "from_node_id": "a"}
+    assert client.post("/v1/assess/blast-radius", json=payload).status_code == 401
+    ok = client.post(
+        "/v1/assess/blast-radius", json=payload, headers={"Authorization": "Bearer s3cret"},
+    )
+    assert ok.status_code == 200
+
+
 def test_assess_policy_decision():
     res = client.post(
         "/v1/assess/policy",
@@ -264,3 +318,79 @@ def test_report_handles_an_empty_application(monkeypatch):
         res = client.post("/v1/report", json={"kind": kind, "format": "pdf", "data": {}})
         assert res.status_code == 200
         assert res.content.startswith(b"%PDF-1.4")
+
+
+# ── Blast radius in reports (docs/15 §5, phase 2) ───────────────────────────
+
+REPORT_DATA_WITH_BLAST_RADIUS = {
+    **REPORT_DATA,
+    "blast_radius": [
+        {
+            "from_node_id": "u", "from_label": "User",
+            "reachable_sinks": [
+                {"node_id": "db", "label": "Customer DB", "sink_kinds": ["sensitive_data"],
+                 "hops": 2, "gated": False},
+                {"node_id": "mail", "label": "send_email", "sink_kinds": ["write_action"],
+                 "hops": 3, "gated": True},
+            ],
+        },
+    ],
+}
+
+
+@pytest.mark.parametrize("kind", ["executive", "technical"])
+def test_report_includes_blast_radius_section_when_supplied(kind, monkeypatch):
+    monkeypatch.delenv("DETECTION_API_KEY", raising=False)
+    res = client.post(
+        "/v1/report", json={"kind": kind, "format": "md", "data": REPORT_DATA_WITH_BLAST_RADIUS},
+    )
+    assert res.status_code == 200
+    assert "BLAST RADIUS" in res.text
+    assert "Customer DB" in res.text
+    assert "no approval gate" in res.text  # the ungated hop
+    assert "send_email" in res.text and "gated" in res.text  # the gated hop
+
+
+def test_report_omits_blast_radius_section_when_not_supplied():
+    """Backward compatibility: a caller that doesn't know about blast radius
+    yet (or a project with no stored graph) must get exactly the same report
+    as before this feature existed."""
+    res = client.post(
+        "/v1/report", json={"kind": "technical", "format": "md", "data": REPORT_DATA},
+    )
+    assert res.status_code == 200
+    assert "BLAST RADIUS" not in res.text
+
+
+def test_report_json_includes_blast_radius_array():
+    res = client.post(
+        "/v1/report", json={"kind": "technical", "format": "json", "data": REPORT_DATA_WITH_BLAST_RADIUS},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["blast_radius"][0]["from_label"] == "User"
+    assert body["blast_radius"][0]["reachable_sinks"][0]["label"] == "Customer DB"
+
+
+def test_governance_report_ignores_blast_radius():
+    """Governance is about controls and outstanding risk counts, not reachability
+    — blast radius deliberately has no place there, so it must not appear."""
+    res = client.post(
+        "/v1/report", json={"kind": "governance", "format": "md", "data": REPORT_DATA_WITH_BLAST_RADIUS},
+    )
+    assert res.status_code == 200
+    assert "BLAST RADIUS" not in res.text
+
+
+def test_report_blast_radius_respects_the_same_redaction_pass():
+    data = {
+        **REPORT_DATA,
+        "blast_radius": [{
+            "from_node_id": "u", "from_label": "User",
+            "reachable_sinks": [{"node_id": "x", "label": "sk-ABCD1234EFGH5678IJKL",
+                                  "sink_kinds": ["sensitive_data"], "hops": 1, "gated": False}],
+        }],
+    }
+    res = client.post("/v1/report", json={"kind": "technical", "format": "md", "data": data})
+    assert res.status_code == 200
+    assert b"sk-ABCD1234EFGH5678IJKL" not in res.content

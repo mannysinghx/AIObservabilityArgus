@@ -122,6 +122,21 @@ interface AssessGraphWire {
   insights: GraphInsightWire[];
 }
 
+interface BlastRadiusHopWire {
+  node_id: string;
+  label: string;
+  sink_kinds: string[];
+  hops: number;
+  gated: boolean;
+}
+
+interface AssessBlastRadiusWire {
+  from_node_id: string;
+  from_label: string;
+  sink_count: number;
+  reachable_sinks: BlastRadiusHopWire[];
+}
+
 // ---------------- run + store ----------------
 
 export interface RunResult {
@@ -410,6 +425,72 @@ export async function listFindings(projectId: string, limit = 200): Promise<unkn
 export const REPORT_KINDS = new Set(["executive", "technical", "governance"]);
 export const REPORT_FORMATS = new Set(["md", "json", "csv", "pdf"]);
 
+const MAX_BLAST_RADIUS_INSIGHTS = 5;
+const BLAST_RADIUS_SEVERITY_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+
+/**
+ * docs/15 §5, phase 2. Best-effort enrichment for the report: walks the
+ * stored graph's highest-severity insights and asks the engine what's
+ * reachable from each. Never throws — a report's actual reason for existing
+ * (findings, controls) must render even if there's no stored graph, the
+ * graph is empty, or the detection service hiccups on this specific call;
+ * losing the blast-radius section is a degraded report, not a failed one.
+ * Capped to the top few insights by severity so a large graph can't turn one
+ * report generation into an unbounded number of detection-service calls.
+ */
+async function computeBlastRadiusEntries(
+  projectId: string,
+): Promise<{ from_node_id: string; from_label: string; reachable_sinks: BlastRadiusHopWire[] }[]> {
+  try {
+    const graph = await getGraph(projectId);
+    if (!graph || (graph.nodes as unknown[]).length === 0) return [];
+
+    const graphWire = await callDetection<AssessGraphWire>("/v1/assess/graph", {
+      project_id: projectId,
+      nodes: graph.nodes,
+      edges: graph.edges,
+    });
+    if (!graphWire.insights.length) return [];
+
+    const byId = new Map(
+      (graph.nodes as { id: string; trust_level?: string }[]).map((n) => [n.id, n]),
+    );
+    const ranked = [...graphWire.insights].sort(
+      (a, b) => (BLAST_RADIUS_SEVERITY_RANK[a.severity] ?? 9) - (BLAST_RADIUS_SEVERITY_RANK[b.severity] ?? 9),
+    );
+    const starts = new Set<string>();
+    for (const insight of ranked) {
+      if (starts.size >= MAX_BLAST_RADIUS_INSIGHTS) break;
+      const untrusted = insight.component_ids.filter((id) => byId.get(id)?.trust_level === "untrusted");
+      for (const id of untrusted.length ? untrusted : insight.component_ids) {
+        if (starts.size >= MAX_BLAST_RADIUS_INSIGHTS) break;
+        starts.add(id);
+      }
+    }
+    if (!starts.size) return [];
+
+    const results = await Promise.all(
+      [...starts].map((fromNodeId) =>
+        callDetection<AssessBlastRadiusWire>("/v1/assess/blast-radius", {
+          project_id: projectId,
+          nodes: graph.nodes,
+          edges: graph.edges,
+          from_node_id: fromNodeId,
+        }),
+      ),
+    );
+    return results
+      .filter((r) => r.reachable_sinks.length > 0)
+      .map((r) => ({
+        from_node_id: r.from_node_id,
+        from_label: r.from_label,
+        reachable_sinks: r.reachable_sinks,
+      }));
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Gather this project's open findings and controls, hand them to the engine's
  * renderer, and return the finished file.
@@ -455,6 +536,12 @@ export async function renderReport(
   const overallRisk = (findings.rows as { risk_score: number | null }[])
     .reduce((m, f) => Math.max(m, Number(f.risk_score ?? 0)), 0);
 
+  // Governance reports don't render blast radius (report.py's own scope
+  // decision — it's about controls and outstanding-risk counts, not
+  // reachability), so skip the extra detection-service calls entirely rather
+  // than compute something that would just be dropped on the floor.
+  const blastRadius = kind === "governance" ? [] : await computeBlastRadiusEntries(safe);
+
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (config.detectionApiKey) headers.authorization = `Bearer ${config.detectionApiKey}`;
 
@@ -471,6 +558,7 @@ export async function renderReport(
         coverage,
         findings: findings.rows,
         controls: controls.rows,
+        blast_radius: blastRadius,
       },
     }),
   });

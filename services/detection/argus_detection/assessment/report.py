@@ -143,6 +143,28 @@ def _counts(findings: list[dict]) -> dict[str, int]:
     return out
 
 
+def _blast_radius_lines(entries: list[dict]) -> list[str]:
+    """docs/15 §5. `entries` is whatever the caller already computed (this
+    module stays pure — no graph traversal here, same division of labor as
+    findings/controls: the caller owns the database and the engines, this
+    module owns the wording). Silently produces nothing when the caller
+    didn't supply any, so every existing report (and every existing test)
+    that predates this section keeps rendering exactly as before."""
+    entries = [e for e in entries if e.get("reachable_sinks")]
+    if not entries:
+        return []
+    lines = ["", "BLAST RADIUS — WHAT'S REACHABLE FROM OPEN FINDINGS"]
+    for e in entries:
+        lines.append(f"  From '{e.get('from_label') or e.get('from_node_id', '')}':")
+        for s in (e.get("reachable_sinks") or [])[:5]:
+            gate = "gated" if s.get("gated") else "no approval gate on the path"
+            kinds = ", ".join(s.get("sink_kinds") or []) or "reachable"
+            lines.append(
+                f"    - {s.get('label', '')} ({kinds}) — {s.get('hops', '?')} hop(s), {gate}"
+            )
+    return lines
+
+
 def _header(data: dict[str, Any], title: str) -> list[str]:
     return [
         f"{title} — {data.get('project_name') or 'Application'}",
@@ -195,6 +217,7 @@ def _executive_lines(data: dict[str, Any]) -> list[str]:
                 f"Not implemented: {cov.get('not_implemented', 0)}"
             ),
         ]
+    lines += _blast_radius_lines(data.get("blast_radius") or [])
     lines += ["", REDACTION_NOTE]
     return lines
 
@@ -202,8 +225,9 @@ def _executive_lines(data: dict[str, Any]) -> list[str]:
 def _technical_lines(data: dict[str, Any]) -> list[str]:
     findings = _sorted_findings(data.get("findings") or [])
     lines = _header(data, "Technical findings")
+    blast_radius = _blast_radius_lines(data.get("blast_radius") or [])
     if not findings:
-        return lines + ["No open findings.", "", REDACTION_NOTE]
+        return lines + ["No open findings."] + blast_radius + ["", REDACTION_NOTE]
     for i, f in enumerate(findings, start=1):
         lines += [
             f"{i}. [{str(f.get('severity', '')).upper()}] {f.get('rule_id', '')} — {f.get('title', '')}",
@@ -232,6 +256,7 @@ def _technical_lines(data: dict[str, Any]) -> list[str]:
             refs = ", ".join(f"{x.get('framework', '')} {x.get('requirement', '')}" for x in fws)
             lines.append(f"   Standards: {refs}")
         lines.append("")
+    lines += blast_radius
     lines += [REDACTION_NOTE]
     return lines
 
@@ -343,6 +368,7 @@ def render(kind: str, fmt: str, data: dict[str, Any]) -> tuple[bytes, str]:
         },
         "findings": _sorted_findings(data.get("findings") or []),
         "controls": data.get("controls") or [],
+        "blast_radius": data.get("blast_radius") or [],
         "redaction_note": REDACTION_NOTE,
     }
     # Redact the serialized form, not just the fields we thought to cover.

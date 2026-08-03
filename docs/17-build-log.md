@@ -34,6 +34,7 @@ traffic.
 | 1 | Blast-radius reachability analysis | [Idea 5](15-platform-evolution-proposals.md#5-blast-radius--business-risk-simulator) | 🧪 Engine only | [`blastradius.py`](../services/detection/argus_detection/assessment/blastradius.py) | [`test_assessment_blastradius.py`](../services/detection/tests/test_assessment_blastradius.py) |
 | 2 | Canary coverage reporting | [Idea 4, phase 1](15-platform-evolution-proposals.md#4-automated-canary-fleet--coverage-reporting) | 🧪 Engine only | [`canaryCoverage.ts`](../apps/web/src/canaryCoverage.ts) | [`canaryCoverage.test.ts`](../tests/canaryCoverage.test.ts) |
 | 3 | Query-intent DSL + compiler | [Idea 6, phase 1](15-platform-evolution-proposals.md#6-natural-language-query-copilot-over-trace--finding-storage) | 🧪 Engine only | [`queryIntent.ts`](../apps/web/src/queryIntent.ts) | [`queryIntent.test.ts`](../tests/queryIntent.test.ts) |
+| 4 | Gateway session risk tracking | [Idea 3, observe-only](15-platform-evolution-proposals.md#3-session-level-gateway-circuit-breaker) | 🧪 Engine only | [`sessionRisk.ts`](../apps/gateway/src/sessionRisk.ts) | [`gatewaySessionRisk.test.ts`](../tests/gatewaySessionRisk.test.ts) |
 
 Nothing below this line yet — updated as each new build lands.
 
@@ -126,6 +127,41 @@ import { validateQueryIntent, describeIntent } from "./apps/web/src/queryIntent.
 const result = validateQueryIntent({ entity: "security_event", filters: { severity: "critical" } });
 if (result.ok) console.log(describeIntent(result.intent));
 // -> "security_event, where severity=critical, limit 100"
+```
+
+---
+
+## 4. Gateway session risk tracking
+
+**What it does.** Tracks how suspicious a *session* has been overall by
+folding per-message scores into a decaying cumulative total (old
+contributions fade with a configurable half-life, default 30 minutes) and
+reports whether that cumulative score *would* cross a breaker threshold.
+**Enforces nothing** — `wouldTrip` is a hypothetical, computed and available
+to log, never acted on. This phase is explicitly observe-only, matching how
+docs/15 says the message-level gateway itself was first rolled out.
+
+**Where to find it.**
+- Pure logic: [`apps/gateway/src/sessionRisk.ts`](../apps/gateway/src/sessionRisk.ts) — `accumulate()`, `assess()`, `describeAssessment()`
+- Redis adapter: same file — `loadSessionRiskState()`, `recordSessionRiskEvent()`
+- Tests: [`tests/gatewaySessionRisk.test.ts`](../tests/gatewaySessionRisk.test.ts) (13 tests, pure-logic only)
+
+**What's NOT there yet.** Not called from `server.ts` — today it changes no
+runtime behavior at all. The next increment is wiring it into the gateway's
+request path in log-only mode (record every event, log what *would* have
+tripped); actual enforcement (holding a specific tool call for human
+approval) is a later, separate increment per docs/15's own phasing.
+
+**Try it yourself** (no Redis needed — pure functions only)
+```ts
+import { accumulate, assess, describeAssessment } from "./apps/gateway/src/sessionRisk.js";
+
+let state = null;
+for (const score of [40, 40, 40, 40]) {
+  state = accumulate(state, "session-abc", { score, timestamp: new Date().toISOString() });
+}
+console.log(describeAssessment(assess(state)));
+// -> "session session-abc: cumulative risk 160.0/150 after 4 event(s) — WOULD TRIP (observe-only — not enforced)"
 ```
 
 ---

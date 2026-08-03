@@ -291,6 +291,7 @@ See [docs/06-roadmap.md](docs/06-roadmap.md) for the full plan.
 | [14 — Merged Features (InjectGuard)](docs/14-merged-features.md) | **The static-assessment half: what merged in, where each piece lives, what didn't, and what's next** |
 | [15 — Platform Evolution Proposals](docs/15-platform-evolution-proposals.md) | Six proposed next-level features (not yet committed): architecture-aware red-teaming, cross-tenant threat intel, gateway circuit breaker, canary fleet, blast-radius simulator, NL query copilot |
 | [16 — The Six New Ideas, Explained Simply](docs/16-proposals-explained-simply.md) | Doc 15's proposals in plain English, no jargon — for non-technical readers |
+| [17 — Build Log](docs/17-build-log.md) | **Living index** — every feature built from doc 15 so far, where its code and tests live, and what's not wired up yet |
 | [RUNBOOK.md](RUNBOOK.md) | How to run the stack locally and reproduce the demo |
 
 ## Built on

@@ -1,0 +1,145 @@
+# 17 — Build Log: New Features and Where to Find Them
+
+A living index of everything built from [docs/15](15-platform-evolution-proposals.md)'s
+six proposals. Each entry is added the same day the code lands, so this stays
+a reliable map rather than something that drifts out of date. If you're
+looking for "did we build X yet, and where is it," this is the doc — not
+`git log`, which tells you *when* something changed but not *what it's for*
+or *whether it's wired up*.
+
+**How to read "status."** Every proposal in doc 15 is scoped into phases on
+purpose (engine first, wiring later — see each proposal's "Phasing"
+section). A feature can be fully built, tested, and merged while still being
+**unwired** — meaning the code exists and works, but nothing in the running
+dashboard or API calls it yet. That's not unfinished work left half-done;
+it's the deliberate build order from
+[docs/15's "Decisions needed"](15-platform-evolution-proposals.md#decisions-needed-before-scoping-further)
+and [the chat record's sequencing](15-platform-evolution-proposals.md#sequencing) —
+prove the safe, additive core before touching anything that serves live
+traffic.
+
+| Symbol | Meaning |
+|---|---|
+| 🧪 Engine only | Built, tested, importable — not called from any route or UI |
+| 🔌 Wired | Reachable through a real API route or dashboard page |
+| 👁️ Observe-only | Wired, but only logs/reports — takes no enforcement action |
+| 🚦 Enforcing | Wired and can actually block/gate/change behavior |
+
+---
+
+## At a glance
+
+| # | Feature | Proposal | Status | Source | Tests |
+|---|---|---|---|---|---|
+| 1 | Blast-radius reachability analysis | [Idea 5](15-platform-evolution-proposals.md#5-blast-radius--business-risk-simulator) | 🧪 Engine only | [`blastradius.py`](../services/detection/argus_detection/assessment/blastradius.py) | [`test_assessment_blastradius.py`](../services/detection/tests/test_assessment_blastradius.py) |
+| 2 | Canary coverage reporting | [Idea 4, phase 1](15-platform-evolution-proposals.md#4-automated-canary-fleet--coverage-reporting) | 🧪 Engine only | [`canaryCoverage.ts`](../apps/web/src/canaryCoverage.ts) | [`canaryCoverage.test.ts`](../tests/canaryCoverage.test.ts) |
+| 3 | Query-intent DSL + compiler | [Idea 6, phase 1](15-platform-evolution-proposals.md#6-natural-language-query-copilot-over-trace--finding-storage) | 🧪 Engine only | [`queryIntent.ts`](../apps/web/src/queryIntent.ts) | [`queryIntent.test.ts`](../tests/queryIntent.test.ts) |
+
+Nothing below this line yet — updated as each new build lands.
+
+---
+
+## 1. Blast-radius reachability analysis
+
+**What it does.** Given an architecture graph and a starting component, walks
+forward to find which sensitive components (data stores, write-capable
+tools, external egress points, cross-tenant edges) are reachable, how many
+hops away, and whether an approval gate sits on the path.
+
+**Where to find it.**
+- Engine: [`services/detection/argus_detection/assessment/blastradius.py`](../services/detection/argus_detection/assessment/blastradius.py) — `compute_blast_radius()`, `blast_radius_for_insight()`
+- Tests: [`services/detection/tests/test_assessment_blastradius.py`](../services/detection/tests/test_assessment_blastradius.py) (17 tests)
+
+**What's NOT there yet.** No report section, no API endpoint
+(`POST /api/assessment/graph/blast-radius` from doc 15 doesn't exist), no UI.
+Doc 15's own phasing calls for wiring into `report.py`'s existing renderers
+next, then the ad-hoc query endpoint.
+
+**Try it yourself**
+```python
+from argus_detection.assessment.graph import GraphNode, GraphEdge
+from argus_detection.assessment.blastradius import compute_blast_radius
+
+nodes = [
+    GraphNode(id="user", node_type="user", trust_level="untrusted"),
+    GraphNode(id="agent", node_type="model"),
+    GraphNode(id="db", node_type="other", attributes={"has_sensitive_data": True}),
+]
+edges = [
+    GraphEdge(source_id="user", target_id="agent", edge_type="sends_prompt"),
+    GraphEdge(source_id="agent", target_id="db", edge_type="reads_data"),
+]
+result = compute_blast_radius(nodes, edges, "user")
+# result.reachable_sinks -> [BlastRadiusHop(node_id='db', sink_kinds=('sensitive_data',), hops=2, ...)]
+```
+
+---
+
+## 2. Canary coverage reporting
+
+**What it does.** Answers "of all the retrieval sources we've seen recently,
+what fraction actually have a live canary planted in them?" — a coverage
+percentage plus a named list of uncovered ("stale") sources.
+
+**Where to find it.**
+- Pure logic: [`apps/web/src/canaryCoverage.ts`](../apps/web/src/canaryCoverage.ts) — `computeCoverage()`, `groupSamplesBySource()`
+- ClickHouse adapter: same file — `fetchRetrievalSamples()`, `getCanaryCoverage()`
+- Tests: [`tests/canaryCoverage.test.ts`](../tests/canaryCoverage.test.ts) (11 tests, pure-logic only — the ClickHouse adapter isn't unit-tested, see the file's own docstring)
+
+**What's NOT there yet.** No `GET /api/canaries/coverage` route, no UI panel,
+no auto-planting (that's phase 2 of the same idea, and needs its own
+consent flow before Argus writes into a customer's documents).
+
+**Try it yourself** (no DB needed — pure functions only)
+```ts
+import { computeCoverage } from "./apps/web/src/canaryCoverage.js";
+
+const sources = [{ sourceRef: "kb-1", lastSeenAt: "2026-01-01T00:00:00Z", contents: ["...no canary here..."] }];
+const result = computeCoverage(sources, /* active canaries */ []);
+// result.pct === 0, result.staleSources === [{ sourceRef: "kb-1", ... }]
+```
+
+---
+
+## 3. Query-intent DSL + compiler
+
+**What it does.** A closed, validated schema (`QueryIntent`) for asking
+structured questions over traces and security events — the safety layer
+underneath a future natural-language query copilot. Validated intents
+compile to calls into the existing `listTraces`/`listSecurityEvents`
+functions; nothing here ever builds a SQL string.
+
+**Where to find it.**
+- Schema + validation: [`apps/web/src/queryIntent.ts`](../apps/web/src/queryIntent.ts) — `validateQueryIntent()`, `describeIntent()`
+- Compiler/dispatch: same file — `runQueryIntent()`
+- Tests: [`tests/queryIntent.test.ts`](../tests/queryIntent.test.ts) (18 tests, on the pure validate/describe logic)
+
+**What's NOT there yet.** No `POST /api/query/ask` route, and — deliberately,
+per doc 15's phasing — no LLM wired in front of it yet. `assessment_finding`
+is not a supported entity yet either (Postgres-backed, different pagination
+shape; scoped out on purpose).
+
+**Try it yourself** (no DB needed for validation)
+```ts
+import { validateQueryIntent, describeIntent } from "./apps/web/src/queryIntent.js";
+
+const result = validateQueryIntent({ entity: "security_event", filters: { severity: "critical" } });
+if (result.ok) console.log(describeIntent(result.intent));
+// -> "security_event, where severity=critical, limit 100"
+```
+
+---
+
+## How to add the next entry
+
+1. Add a row to the "At a glance" table.
+2. Add a numbered section below it, same shape as the ones above: what it
+   does, where to find it (source + tests), what's deliberately not there
+   yet, and a runnable snippet.
+3. Update the status symbol as a feature moves from 🧪 → 🔌 → 👁️/🚦 in later
+   commits — don't leave a stale 🧪 once something is actually wired up.
+
+## Related documents
+
+- [15 — Platform Evolution Proposals](15-platform-evolution-proposals.md) — the design and phasing behind everything in this log
+- [16 — The Six New Ideas, Explained Simply](16-proposals-explained-simply.md) — plain-English version of the same six proposals

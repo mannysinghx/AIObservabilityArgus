@@ -118,6 +118,13 @@ export const LIMITS = {
   emailTrigger: { limit: 5, windowMs: 60 * 60_000 },
   /** Reset-token submission (guessing a token). */
   resetSubmit: { limit: 20, windowMs: 15 * 60_000 },
+  /**
+   * Second-factor submission. A six-digit code is a 1-in-a-million guess per
+   * try, which is only strong while the number of tries is bounded — this is
+   * the bound. Tight enough that brute force is hopeless, loose enough to
+   * survive a few fat-fingered codes and a clock-drift retry.
+   */
+  mfaVerify: { limit: 10, windowMs: 15 * 60_000 },
   /** General authenticated dashboard API traffic, per user. */
   api: { limit: 600, windowMs: 60_000 },
   /** Telemetry ingest, per project. Generous — this is the product's hot path. */

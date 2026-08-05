@@ -128,6 +128,7 @@
     <div class="rail-foot">
       <a class="nav-item" href="/onboard.html" style="text-decoration:none;"><span class="nav-ico">+</span>Connect a new app</a>
       <button class="nav-item" type="button" data-nav="guide"><span class="nav-ico">ℹ</span>User Guide</button>
+      <button class="nav-item" type="button" data-nav="account"><span class="nav-ico">⚿</span>Security</button>
       <button class="nav-item" type="button" data-nav="appearance"><span class="nav-ico">◐</span>Appearance</button>
     </div>
   </nav>
@@ -707,6 +708,83 @@
       </section>
 
       <!-- SETTINGS -->
+      <!-- ACCOUNT SECURITY (per-user, not per-application) -->
+      <section class="view" id="view-account">
+        <div class="page-head"><h1 class="page-title">Security</h1><span class="page-sub">your account — not this application's settings</span></div>
+
+        <div class="card" style="max-width:720px">
+          <div class="card-head">
+            <span class="card-title">Two-factor authentication</span>
+            <span class="card-hint" id="mfaStateHint">checking…</span>
+          </div>
+
+          <div class="pad" style="padding:calc(var(--u)*3.2);display:grid;gap:calc(var(--u)*3)">
+            <p style="margin:0;font-size:12.5px;color:var(--ink-muted)">
+              A second factor means a stolen password isn't enough to reach your traces, prompts and findings.
+              Argus uses time-based one-time codes (TOTP), so any authenticator app works — 1Password, Authy,
+              Google Authenticator, or your password manager.
+            </p>
+
+            <!-- OFF -->
+            <div id="mfaOff" style="display:none">
+              <button class="btn btn-primary" id="mfaSetupBtn" type="button" style="padding:8px 16px;font-size:13px">Set up two-factor authentication</button>
+            </div>
+
+            <!-- ENROLLING -->
+            <div id="mfaSetup" style="display:none;gap:calc(var(--u)*3)">
+              <div>
+                <div style="font-size:12px;font-weight:600;margin-bottom:6px">1. Add this key to your authenticator</div>
+                <div class="mono" id="mfaSecret" style="user-select:all;font-size:15px;letter-spacing:.12em;word-break:break-all;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface-2)"></div>
+                <div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+                  <button class="btn" id="mfaCopyBtn" type="button" style="padding:4px 11px;font-size:11.5px">Copy key</button>
+                  <a id="mfaOtpauth" href="#" style="font-size:11.5px;color:var(--accent);text-decoration:none">Open in authenticator app →</a>
+                </div>
+              </div>
+              <div>
+                <div style="font-size:12px;font-weight:600;margin-bottom:6px">2. Enter the 6-digit code it shows</div>
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                  <input id="mfaEnableCode" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="000000"
+                         style="font-family:var(--mono,ui-monospace,monospace);font-size:15px;letter-spacing:.16em;width:130px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink)">
+                  <button class="btn btn-primary" id="mfaEnableBtn" type="button" style="padding:8px 16px;font-size:13px">Turn on</button>
+                  <button class="btn" id="mfaCancelBtn" type="button" style="padding:8px 14px;font-size:12.5px">Cancel</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- RECOVERY CODES (shown once, immediately after enabling) -->
+            <div id="mfaCodes" style="display:none;border:1px solid var(--sev-high);border-radius:var(--radius);padding:calc(var(--u)*3)">
+              <div style="font-size:12.5px;font-weight:650;margin-bottom:4px">Save your recovery codes</div>
+              <p style="margin:0 0 10px;font-size:12px;color:var(--ink-muted)">
+                Each one signs you in once if you lose your device. <b>This is the only time they're shown.</b>
+              </p>
+              <div class="mono" id="mfaCodeList" style="user-select:all;font-size:13px;line-height:1.9;letter-spacing:.08em;columns:2;padding:10px 12px;border-radius:var(--radius);background:var(--surface-2)"></div>
+              <div style="margin-top:10px;display:flex;gap:10px">
+                <button class="btn" id="mfaCopyCodesBtn" type="button" style="padding:4px 11px;font-size:11.5px">Copy codes</button>
+                <button class="btn" id="mfaCodesDoneBtn" type="button" style="padding:4px 11px;font-size:11.5px">I've saved them</button>
+              </div>
+            </div>
+
+            <!-- ON -->
+            <div id="mfaOn" style="display:none;gap:calc(var(--u)*2.5)">
+              <div style="font-size:12.5px" id="mfaOnSummary"></div>
+              <details>
+                <summary style="font-size:12.5px;cursor:pointer;color:var(--ink-muted)">Turn off two-factor authentication</summary>
+                <div style="margin-top:12px;display:grid;gap:10px;max-width:340px">
+                  <p style="margin:0;font-size:12px;color:var(--ink-muted)">Confirm with your password and a current code.</p>
+                  <input id="mfaDisablePass" type="password" autocomplete="current-password" placeholder="Password"
+                         style="font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink)">
+                  <input id="mfaDisableCode" type="text" inputmode="numeric" maxlength="14" autocomplete="one-time-code" placeholder="Code or recovery code"
+                         style="font-family:var(--mono,ui-monospace,monospace);font-size:13px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink)">
+                  <button class="btn" id="mfaDisableBtn" type="button" style="padding:7px 14px;font-size:12.5px;border-color:var(--sev-high);color:var(--sev-high)">Turn off</button>
+                </div>
+              </details>
+            </div>
+
+            <div id="mfaNote" style="display:none;font-size:12.5px"></div>
+          </div>
+        </div>
+      </section>
+
       <section class="view" id="view-appearance">
         <div class="page-head"><h1 class="page-title">Settings — Appearance</h1><span class="page-sub">applies instantly — same token system as the design spec</span></div>
         <div class="settings-grid">

@@ -55,6 +55,20 @@
         <div style="text-align:center"><a href="#" id="backToLogin" style="font-size:12px;color:var(--accent);text-decoration:none">← Back to sign in</a></div>
       </form>
 
+      <!-- TWO-FACTOR CODE (shown after a correct password on an MFA account) -->
+      <form id="mfaForm" style="margin-top:calc(var(--u)*3); display:none">
+        <p style="font-size:12.5px;color:var(--ink-muted);margin:0">Enter the 6-digit code from your authenticator app.</p>
+        <div class="field">
+          <label for="mfa-code">Authentication code</label>
+          <input id="mfa-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="14"
+                 pattern="[0-9A-Za-z \-]*" autocapitalize="off" spellcheck="false" required
+                 style="font-family:var(--mono,ui-monospace,monospace);letter-spacing:.14em;font-size:15px">
+          <span class="hint" id="mfaHint">Lost your device? Enter one of your recovery codes instead.</span>
+        </div>
+        <button class="btn btn-primary" id="mfaBtn" type="submit">Verify</button>
+        <div style="text-align:center"><a href="#" id="mfaBack" style="font-size:12px;color:var(--accent);text-decoration:none">← Back to sign in</a></div>
+      </form>
+
       <!-- CREATE ACCOUNT -->
       <form id="signupForm" style="margin-top:calc(var(--u)*3); display:none">
         <div class="field"><label for="su-name">Your name</label><input id="su-name" type="text" autocomplete="name"></div>

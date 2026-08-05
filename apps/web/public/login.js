@@ -63,6 +63,47 @@ document.querySelectorAll("#tabs button").forEach((b) => b.addEventListener("cli
   showErr("");
 }));
 
+// ---- two-factor ----
+// The challenge token stands in for "password already accepted". It is not a
+// session and grants nothing on its own, so holding it in a page variable (and
+// losing it on reload) is exactly the lifetime we want.
+let MFA_CHALLENGE = null;
+function showMfa(on) {
+  $("#tabs").style.display = on ? "none" : "flex";
+  $("#loginForm").style.display = on ? "none" : "grid";
+  $("#signupForm").style.display = "none";
+  $("#forgotForm").style.display = "none";
+  $("#mfaForm").style.display = on ? "grid" : "none";
+  showErr("");
+  if (on) setTimeout(() => $("#mfa-code").focus(), 0);
+  else { MFA_CHALLENGE = null; $("#mfa-code").value = ""; }
+}
+$("#mfaBack").addEventListener("click", (e) => { e.preventDefault(); showMfa(false); });
+$("#mfaForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const btn = $("#mfaBtn");
+  showErr("");
+  btn.disabled = true; btn.textContent = "Verifying…";
+  try {
+    const res = await fetch("/api/auth/mfa/verify", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ challenge: MFA_CHALLENGE, code: $("#mfa-code").value.trim() }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      showErr(data.error || `Failed (${res.status})`);
+      $("#mfa-code").select();
+      return;
+    }
+    location.href = "/";
+  } catch {
+    showErr("Network error — please try again.");
+  } finally {
+    btn.disabled = false; btn.textContent = "Verify";
+  }
+});
+
 async function submit(url, body, btn, label) {
   showErr("");
   btn.disabled = true; btn.textContent = "Please wait…";
@@ -74,6 +115,9 @@ async function submit(url, body, btn, label) {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) { showErr(data.error || `Failed (${res.status})`); return; }
+    // Password was right, but this account has a second factor: no cookie was
+    // set, so swap to the code form rather than redirecting.
+    if (data.mfaRequired) { MFA_CHALLENGE = data.challenge; showMfa(true); return; }
     location.href = "/"; // cookie is set; land on the catalog
   } catch (e) {
     showErr("Network error — please try again.");

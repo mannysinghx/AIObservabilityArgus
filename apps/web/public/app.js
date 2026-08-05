@@ -174,7 +174,7 @@ function breakdown(sel, items, isSev) {
 }
 
 // ---------- routing ----------
-const VIEWS = ["apps", "overview", "threat", "incidents", "review", "assess", "redteam", "traces", "trace", "sessions", "analytics", "prompts", "evals", "settings", "keys", "canaries", "alerts", "team", "audit", "admin", "customers", "adminusers", "auditall", "appearance", "guide"];
+const VIEWS = ["apps", "overview", "threat", "incidents", "review", "assess", "redteam", "traces", "trace", "sessions", "analytics", "prompts", "evals", "settings", "keys", "canaries", "alerts", "team", "audit", "admin", "customers", "adminusers", "auditall", "account", "appearance", "guide"];
 function show(view) {
   VIEWS.forEach((v) => $(`#view-${v}`).classList.toggle("on", v === view));
   document.querySelectorAll(".nav-item[data-nav]").forEach((b) => b.classList.toggle("active", b.dataset.nav === view));
@@ -758,7 +758,7 @@ function load(view) {
   // "N of M match" note rather than leaving it contradicting the screen.
   if (searchInput) { searchInput.value = ""; const n = $("#searchNote"); if (n) n.textContent = ""; }
   if (!PROJECT && SCOPED_VIEWS.has(view)) { banner("Select an application from Applications to view its data."); return; }
-  ({ apps: loadApps, overview: loadOverview, threat: loadThreat, incidents: loadIncidents, review: loadReview, assess: loadAssess, traces: loadTraces, sessions: loadSessions, analytics: loadAnalytics, evals: loadEvals, settings: loadSettings, keys: loadKeys, canaries: loadCanaries, alerts: loadAlerts, team: loadTeam, audit: loadAudit, admin: loadAdmin, customers: loadCustomers, adminusers: loadAdminUsers, auditall: loadAuditAll }[view] || (() => {}))();
+  ({ apps: loadApps, overview: loadOverview, threat: loadThreat, incidents: loadIncidents, review: loadReview, assess: loadAssess, traces: loadTraces, sessions: loadSessions, analytics: loadAnalytics, evals: loadEvals, settings: loadSettings, keys: loadKeys, canaries: loadCanaries, alerts: loadAlerts, team: loadTeam, audit: loadAudit, admin: loadAdmin, customers: loadCustomers, adminusers: loadAdminUsers, auditall: loadAuditAll, account: loadAccount }[view] || (() => {}))();
 }
 
 // ---------- Canaries ----------
@@ -2305,6 +2305,115 @@ $("#inviteBtn")?.addEventListener("click", async () => {
     $("#inviteEmail").value = "";
     loadTeam();
   } catch (e) { out.innerHTML = `<span style="color:var(--sev-critical);font-size:12px">${esc(e.message)}</span>`; }
+});
+
+// ---------- account security (two-factor) ----------
+// Per-user, not per-application: this page is deliberately outside SCOPED_VIEWS
+// so it works without an app selected. Everything here talks to /api/mfa/*,
+// which sits on the authenticated side of the /api/auth/ boundary.
+function mfaShow(which) {
+  $("#mfaOff").style.display = which === "off" ? "block" : "none";
+  $("#mfaSetup").style.display = which === "setup" ? "grid" : "none";
+  $("#mfaOn").style.display = which === "on" ? "grid" : "none";
+}
+function mfaNote(msg, kind) {
+  const el = $("#mfaNote");
+  if (!msg) { el.style.display = "none"; return; }
+  el.style.display = "block";
+  el.textContent = msg;
+  el.style.color = kind === "err" ? "var(--sev-critical)" : kind === "ok" ? "var(--ok)" : "var(--ink-muted)";
+}
+async function loadAccount() {
+  mfaNote("");
+  $("#mfaCodes").style.display = "none";
+  try {
+    const s = await (await fetch("/api/mfa")).json();
+    if (s.enabled) {
+      $("#mfaStateHint").textContent = "on";
+      $("#mfaStateHint").style.color = "var(--ok)";
+      const n = s.recoveryRemaining;
+      $("#mfaOnSummary").innerHTML =
+        `Two-factor authentication is <b style="color:var(--ok)">on</b> for this account. ` +
+        `<span class="dim">${n} recovery code${n === 1 ? "" : "s"} remaining` +
+        (s.secretEncrypted ? " · secret encrypted at rest" : "") + `.</span>` +
+        (n === 0 ? ` <span style="color:var(--sev-high)">No recovery codes left — turn 2FA off and on again to reissue.</span>` : "");
+      mfaShow("on");
+    } else {
+      $("#mfaStateHint").textContent = "off";
+      $("#mfaStateHint").style.color = "var(--sev-medium)";
+      mfaShow("off");
+      if (s.pendingSetup) mfaNote("You started setting this up but never finished — start again below.", "");
+    }
+  } catch {
+    $("#mfaStateHint").textContent = "unavailable";
+    mfaNote("Couldn't load your security settings just now.", "err");
+  }
+}
+$("#mfaSetupBtn")?.addEventListener("click", async () => {
+  mfaNote("");
+  try {
+    const res = await fetch("/api/mfa/setup", { method: "POST" });
+    const d = await res.json();
+    if (!res.ok) { mfaNote(d.error || "Couldn't start setup.", "err"); return; }
+    // Grouped in fours — this gets retyped by hand into a phone.
+    $("#mfaSecret").textContent = d.secret.replace(/(.{4})/g, "$1 ").trim();
+    $("#mfaOtpauth").href = d.otpauthUrl;
+    $("#mfaEnableCode").value = "";
+    mfaShow("setup");
+    $("#mfaEnableCode").focus();
+  } catch { mfaNote("Network error — try again.", "err"); }
+});
+$("#mfaCopyBtn")?.addEventListener("click", () => {
+  navigator.clipboard?.writeText($("#mfaSecret").textContent.replace(/\s/g, ""));
+  $("#mfaCopyBtn").textContent = "Copied";
+  setTimeout(() => { $("#mfaCopyBtn").textContent = "Copy key"; }, 1500);
+});
+$("#mfaCancelBtn")?.addEventListener("click", async () => {
+  try { await fetch("/api/mfa/cancel", { method: "POST" }); } catch { /* reload reflects truth */ }
+  loadAccount();
+});
+$("#mfaEnableBtn")?.addEventListener("click", async () => {
+  const btn = $("#mfaEnableBtn"); btn.disabled = true;
+  mfaNote("");
+  try {
+    const res = await fetch("/api/mfa/enable", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code: $("#mfaEnableCode").value.trim() }),
+    });
+    const d = await res.json();
+    if (!res.ok) { mfaNote(d.error || "Couldn't turn it on.", "err"); $("#mfaEnableCode").select(); return; }
+    $("#mfaCodeList").innerHTML = (d.recoveryCodes || []).map((c) => esc(c)).join("<br>");
+    $("#mfaCodes").style.display = "block";
+    mfaShow("on");
+    $("#mfaStateHint").textContent = "on";
+    $("#mfaStateHint").style.color = "var(--ok)";
+    $("#mfaOnSummary").innerHTML = 'Two-factor authentication is <b style="color:var(--ok)">on</b> for this account.';
+  } catch { mfaNote("Network error — try again.", "err"); }
+  finally { btn.disabled = false; }
+});
+$("#mfaCopyCodesBtn")?.addEventListener("click", () => {
+  navigator.clipboard?.writeText($("#mfaCodeList").textContent.trim().split(/\s+/).join("\n"));
+  $("#mfaCopyCodesBtn").textContent = "Copied";
+  setTimeout(() => { $("#mfaCopyCodesBtn").textContent = "Copy codes"; }, 1500);
+});
+$("#mfaCodesDoneBtn")?.addEventListener("click", () => { $("#mfaCodes").style.display = "none"; loadAccount(); });
+$("#mfaDisableBtn")?.addEventListener("click", async () => {
+  const btn = $("#mfaDisableBtn"); btn.disabled = true;
+  mfaNote("");
+  try {
+    const res = await fetch("/api/mfa/disable", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ password: $("#mfaDisablePass").value, code: $("#mfaDisableCode").value.trim() }),
+    });
+    const d = await res.json();
+    if (!res.ok) { mfaNote(d.error || "Couldn't turn it off.", "err"); return; }
+    $("#mfaDisablePass").value = ""; $("#mfaDisableCode").value = "";
+    await loadAccount();
+    mfaNote("Two-factor authentication is now off.", "ok");
+  } catch { mfaNote("Network error — try again.", "err"); }
+  finally { btn.disabled = false; }
 });
 
 // ---------- auth gate + user menu ----------

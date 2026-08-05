@@ -9,6 +9,7 @@ import { config, rateLimit, LIMITS, metrics, refreshQueueMetrics } from "@argus/
 import * as Q from "./queries.js";
 import * as Onboarding from "./onboarding.js";
 import * as Auth from "./auth.js";
+import * as Mfa from "./mfa.js";
 import * as Admin from "./admin.js";
 import * as Audit from "./audit.js";
 import * as Settings from "./settings.js";
@@ -229,6 +230,14 @@ export async function buildApp() {
       return false;
     }
     if (path === "/api/auth/signup") return limited(req, reply, "signup", LIMITS.signup);
+    // Keyed by the challenge token as well as the IP: the token identifies the
+    // account being attacked, so rotating IPs can't buy extra guesses against it.
+    if (path === "/api/auth/mfa/verify") {
+      const challenge = String((req.body as { challenge?: string } | undefined)?.challenge ?? "");
+      if (await limited(req, reply, "mfa-ip", LIMITS.mfaVerify)) return true;
+      if (challenge && (await limited(req, reply, "mfa-challenge", LIMITS.mfaVerify, challenge))) return true;
+      return false;
+    }
     if (path === "/api/auth/forgot" || path === "/api/auth/resend")
       return limited(req, reply, "email-trigger", LIMITS.emailTrigger);
     if (path === "/api/auth/reset" || path === "/api/auth/verify")
@@ -304,9 +313,39 @@ export async function buildApp() {
       reply.code(401).send(r);
       return;
     }
+    // Password was right but the account has a second factor. No cookie is set
+    // here — the challenge token is not a session and grants nothing on its own.
+    if ("mfaRequired" in r) {
+      void Audit.record("user.mfa_challenged", { actorEmail: String(email || "").toLowerCase(), ip: req.ip });
+      return { mfaRequired: true, challenge: r.challenge };
+    }
     reply.header("set-cookie", Auth.sessionCookie(r.token, secureReq(req)));
     void Audit.record("user.login", { actor: r.user.id, actorEmail: r.user.email, ip: req.ip });
     return { user: r.user };
+  });
+
+  // Second leg of a two-factor sign-in. Public by necessity (there is no
+  // session yet) — the challenge token is the credential, and it is rate
+  // limited per token as well as per IP above.
+  app.post<{ Body: { challenge?: string; code?: string } }>("/api/auth/mfa/verify", async (req, reply) => {
+    const { challenge, code } = req.body || {};
+    const r = await Auth.completeMfaLogin(challenge || "", code || "");
+    if ("error" in r) {
+      void Audit.record("user.mfa_failed", { ip: req.ip });
+      reply.code(401).send(r);
+      return;
+    }
+    reply.header("set-cookie", Auth.sessionCookie(r.token, secureReq(req)));
+    void Audit.record("user.login", {
+      actor: r.user.id, actorEmail: r.user.email, ip: req.ip,
+      metadata: { mfa: true, recoveryCode: r.usedRecoveryCode },
+    });
+    // Spending a recovery code is worth telling the user about — it's both a
+    // dwindling resource and, if they didn't do it, an intrusion.
+    if (r.usedRecoveryCode) {
+      void Audit.record("user.mfa_recovery_used", { actor: r.user.id, actorEmail: r.user.email, ip: req.ip });
+    }
+    return { user: r.user, usedRecoveryCode: r.usedRecoveryCode };
   });
 
   app.post("/api/auth/logout", async (req, reply) => {
@@ -347,6 +386,60 @@ export async function buildApp() {
     if (!user) { reply.code(401).send({ error: "not authenticated" }); return; }
     try { return await Auth.resendVerification(user.id, user.email, user.name); }
     catch (err) { app.log.error({ err }, "resend failed"); reply.code(500).send({ error: "could not resend" }); }
+  });
+
+  // ---------------- two-factor enrolment ----------------
+  // Deliberately NOT under /api/auth/, which the preHandler treats as public
+  // ("these manage their own session"). Everything here acts on an already
+  // signed-in user, so it belongs on the authenticated side of that boundary
+  // and inherits the standard 401 + per-user rate limit.
+
+  app.get("/api/mfa", async (req, reply) => {
+    const user = userOf(req)!;
+    try { return await Mfa.status(user.id); }
+    catch (err) { app.log.error({ err }, "mfa status failed"); reply.code(503).send({ error: String(err) }); }
+  });
+
+  app.post("/api/mfa/setup", async (req, reply) => {
+    const user = userOf(req)!;
+    const r = await Mfa.beginSetup(user.id, user.email);
+    if ("error" in r) { reply.code(400).send(r); return; }
+    // The secret and its QR are returned exactly once, to the person who asked
+    // for them. Nothing about them is audited — the audit trail records that
+    // enrolment happened, never the material that makes it work.
+    void Audit.record("user.mfa_setup_started", { actor: user.id, actorEmail: user.email, ip: req.ip });
+    return r;
+  });
+
+  app.post<{ Body: { code?: string } }>("/api/mfa/enable", async (req, reply) => {
+    const user = userOf(req)!;
+    const r = await Mfa.enable(user.id, req.body?.code || "");
+    if ("error" in r) { reply.code(400).send(r); return; }
+    void Audit.record("user.mfa_enabled", { actor: user.id, actorEmail: user.email, ip: req.ip });
+    return r;
+  });
+
+  // Turning the second factor off is the move an attacker on a stolen session
+  // makes, so it costs a password AND a current code — the two things a session
+  // cookie alone doesn't give you.
+  app.post<{ Body: { password?: string; code?: string } }>("/api/mfa/disable", async (req, reply) => {
+    const user = userOf(req)!;
+    if (!(await Auth.checkPassword(user.id, req.body?.password || ""))) {
+      void Audit.record("user.mfa_disable_rejected", { actor: user.id, actorEmail: user.email, ip: req.ip, metadata: { reason: "password" } });
+      reply.code(400).send({ error: "That password isn't right." });
+      return;
+    }
+    const r = await Mfa.disable(user.id, req.body?.code || "");
+    if ("error" in r) { reply.code(400).send(r); return; }
+    void Audit.record("user.mfa_disabled", { actor: user.id, actorEmail: user.email, ip: req.ip });
+    return r;
+  });
+
+  // Back out of a half-finished enrolment.
+  app.post("/api/mfa/cancel", async (req, reply) => {
+    const user = userOf(req)!;
+    await Mfa.cancelSetup(user.id);
+    return { ok: true };
   });
 
   // ---------------- scoped data queries ----------------

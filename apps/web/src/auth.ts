@@ -2,6 +2,7 @@ import { scryptSync, randomBytes, timingSafeEqual } from "node:crypto";
 import { pool, sha256 } from "./db.js";
 import { safeProjectId } from "./ids.js";
 import * as Email from "./email.js";
+import * as Mfa from "./mfa.js";
 
 function baseUrl(): string {
   if (process.env.PUBLIC_URL) return process.env.PUBLIC_URL.replace(/\/$/, "");
@@ -219,10 +220,17 @@ export async function signup(
   }
 }
 
-export async function login(
-  emailRaw: string,
-  password: string,
-): Promise<{ token: string; user: SessionUser } | AuthError> {
+/**
+ * Three outcomes, not two: the password can be wrong, the password can be
+ * enough, or the password can be correct but only half the story. The middle
+ * state deliberately carries no session — see mfa_challenges in 017_mfa.sql.
+ */
+export type LoginResult =
+  | { token: string; user: SessionUser }
+  | { mfaRequired: true; challenge: string }
+  | AuthError;
+
+export async function login(emailRaw: string, password: string): Promise<LoginResult> {
   const email = String(emailRaw || "").trim().toLowerCase();
   const r = await pool.query<{ id: string; email: string; name: string; password_hash: string; email_verified: boolean; is_platform_admin: boolean }>(
     "SELECT id, email, name, password_hash, email_verified, is_platform_admin FROM users WHERE email = $1",
@@ -232,10 +240,63 @@ export async function login(
   if (!u || !verifyPassword(password, u.password_hash)) {
     return { error: "Incorrect email or password." };
   }
+  // Second factor, if this account has one. Nothing that follows — no session,
+  // no invite activation — happens until the factor is presented.
+  if (await Mfa.isEnabled(u.id)) {
+    return { mfaRequired: true, challenge: await Mfa.createChallenge(u.id) };
+  }
+  return {
+    token: await finishLogin(u.id, u.email, u.email_verified),
+    user: { id: u.id, email: u.email, name: u.name, emailVerified: u.email_verified, isPlatformAdmin: u.is_platform_admin },
+  };
+}
+
+/** The tail of a successful login, shared by the one-factor and two-factor paths. */
+async function finishLogin(id: string, email: string, emailVerified: boolean): Promise<string> {
   // Pick up invites created since last login — verified addresses only (see signup).
-  if (u.email_verified) await activateInvites(pool, u.id, u.email);
-  const token = await createSession(pool, u.id);
-  return { token, user: { id: u.id, email: u.email, name: u.name, emailVerified: u.email_verified, isPlatformAdmin: u.is_platform_admin } };
+  if (emailVerified) await activateInvites(pool, id, email);
+  return createSession(pool, id);
+}
+
+/**
+ * Second leg of a two-factor login: exchange a challenge token plus a TOTP or
+ * recovery code for a real session. The challenge survives a wrong code (so a
+ * typo doesn't send the user back to the password form) but is burned the
+ * moment one is accepted.
+ */
+export async function completeMfaLogin(
+  challenge: string,
+  code: string,
+): Promise<{ token: string; user: SessionUser; usedRecoveryCode: boolean } | AuthError> {
+  const userId = await Mfa.challengeUser(challenge);
+  if (!userId) return { error: "That sign-in attempt expired. Please enter your password again." };
+
+  const v = await Mfa.verifyForLogin(userId, code);
+  if (!v.ok) return { error: "That code isn't right. Try again, or use a recovery code." };
+
+  await Mfa.consumeChallenge(challenge);
+  const r = await pool.query<{ id: string; email: string; name: string; email_verified: boolean; is_platform_admin: boolean }>(
+    "SELECT id, email, name, email_verified, is_platform_admin FROM users WHERE id = $1",
+    [userId],
+  );
+  const u = r.rows[0];
+  if (!u) return { error: "Account not found." };
+  return {
+    token: await finishLogin(u.id, u.email, u.email_verified),
+    user: { id: u.id, email: u.email, name: u.name, emailVerified: u.email_verified, isPlatformAdmin: u.is_platform_admin },
+    usedRecoveryCode: !!v.usedRecoveryCode,
+  };
+}
+
+/**
+ * Re-check a signed-in user's password. Turning MFA off is precisely what
+ * someone holding a stolen session would do, so that route asks for the
+ * password again rather than trusting the cookie.
+ */
+export async function checkPassword(userId: string, password: string): Promise<boolean> {
+  const r = await pool.query<{ password_hash: string }>("SELECT password_hash FROM users WHERE id = $1", [userId]);
+  const row = r.rows[0];
+  return !!row && verifyPassword(password, row.password_hash);
 }
 
 async function createSession(

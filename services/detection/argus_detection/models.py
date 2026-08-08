@@ -47,6 +47,10 @@ class Category(str, Enum):
     pii_egress = "pii_egress"
     canary_triggered = "canary_triggered"
     obfuscation = "obfuscation"
+    # L0 (docs/18): the artifact plane. Every category above describes something
+    # a hostile *input* did at runtime; this one describes what a model FILE
+    # would do the moment it is deserialized — before any traffic exists.
+    supply_chain = "supply_chain"
 
 
 class Outcome(str, Enum):

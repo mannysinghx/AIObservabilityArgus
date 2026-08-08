@@ -190,6 +190,76 @@ class AssessPolicyResponse(BaseModel):
     message: str | None = None
 
 
+class GlobalRefIn(BaseModel):
+    """One `module.name` a pickle stream resolves, as extracted at the edge."""
+
+    module: str = ""
+    name: str = ""
+    opcode: str = "GLOBAL"
+    offset: int = 0
+    member: str = ""
+
+
+class ArchiveMemberIn(BaseModel):
+    name: str = ""
+    size: int = 0
+    compress_type: int = 0
+    is_pickle: bool = False
+    # Verbatim from the zip header. Normalizing it would erase the exact
+    # traversal evidence ARG-ART-006 exists to find, so it travels unmodified.
+    raw_name: str = ""
+
+
+class ArtifactManifestIn(BaseModel):
+    """What the CLI extracted from one model file (docs/18 §4.1).
+
+    Kilobytes, never the weights. This service must never read a model file:
+    `assessment` has committed to no I/O, and a multi-gigabyte checkpoint has no
+    business crossing a network when the twelve module names inside it are the
+    entire question.
+    """
+
+    path: str = ""
+    sha256: str = ""
+    size_bytes: int = 0
+    format: str = "unknown"
+    source_uri: str = ""
+    revision: str = ""
+
+    globals: list[GlobalRefIn] = Field(default_factory=list)
+    opcode_summary: dict[str, int] = Field(default_factory=dict)
+    archive_members: list[ArchiveMemberIn] = Field(default_factory=list)
+    tensor_keys: list[str] = Field(default_factory=list)
+    declared_arch: str = ""
+    onnx_custom_ops: list[str] = Field(default_factory=list)
+    onnx_external_data: list[str] = Field(default_factory=list)
+    keras_layer_types: list[str] = Field(default_factory=list)
+    parse_errors: list[str] = Field(default_factory=list)
+
+
+class AssessArtifactRequest(BaseModel):
+    project_id: str = "default"
+    artifacts: list[ArtifactManifestIn]
+    context: AssessContext = Field(default_factory=AssessContext)
+    # Import prefixes belonging to the caller's own code. Without these, every
+    # custom nn.Module subclass reports as an unrecognized reference — true, but
+    # useless, and noise is how an inventory signal gets ignored.
+    first_party_prefixes: list[str] = Field(default_factory=list)
+    top_mitigations: int = Field(default=3, ge=0, le=10)
+
+
+class AssessArtifactResponse(BaseModel):
+    project_id: str
+    finding_count: int
+    max_severity: str | None = None
+    overall_risk: int = 0
+    scoring_version: str
+    # Pinned into the response because it decides every verdict here. A finding
+    # nobody can reproduce is a finding nobody can argue with.
+    allowlist_version: str
+    findings: list[AssessFinding] = Field(default_factory=list)
+
+
 class ReportRequest(BaseModel):
     """Render a report from data the caller has already gathered. This service
     owns no database, so the findings/controls arrive in the request; it owns

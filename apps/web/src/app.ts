@@ -868,6 +868,48 @@ export async function buildApp() {
     },
   );
 
+  // L0 — model artifacts (docs/18). Same shape as the prompt route: the engine
+  // is a pure function in the detection service, this owns tenancy + storage.
+  // The caller sends a manifest, never a model file — a checkpoint is gigabytes
+  // and the module names inside it are the entire question.
+  app.post<{
+    Body: {
+      project?: string;
+      artifacts?: Assessments.ArtifactManifestIn[];
+      first_party_prefixes?: string[];
+    };
+  }>(
+    "/api/assess/artifact",
+    async (req, reply) => {
+      const g = await roleGate(req, reply, req.body?.project, "member");
+      if (!g) return;
+      const invalid = Assessments.validateArtifacts(req.body?.artifacts);
+      if (invalid) { reply.code(400).send({ error: invalid }); return; }
+      try {
+        const r = await Assessments.runArtifactAssessment(
+          req.body!.project!,
+          req.body!.artifacts!,
+          (req.body?.first_party_prefixes ?? []).slice(0, 100).map(String),
+          userOf(req)!.id,
+        );
+        if (!r) { reply.code(400).send({ error: "invalid project" }); return; }
+        audit(req, "assessment.run", {
+          orgId: g.orgId, targetType: "assessment", target: r.id,
+          metadata: {
+            project: req.body?.project, kind: "artifact",
+            artifacts: req.body!.artifacts!.length,
+            findings: r.findingCount, maxSeverity: r.maxSeverity,
+            allowlistVersion: r.allowlistVersion,
+          },
+        });
+        return r;
+      } catch (err) {
+        app.log.error({ err }, "assess artifact failed");
+        reply.code(503).send({ error: "assessment engine unavailable" });
+      }
+    },
+  );
+
   app.post<{ Body: { project?: string; nodes?: Assessments.GraphNodeIn[]; edges?: Assessments.GraphEdgeIn[] } }>(
     "/api/assessment/graph",
     async (req, reply) => {

@@ -5,6 +5,7 @@ Endpoints:
   POST /v1/scan             scan one observation (L1 + optional L2)
   POST /v1/scan/trace       scan a completed trace (L4 behavioral analysis)
   POST /v1/assess/prompt    static prompt assessment (rules + risk + mitigations)
+  POST /v1/assess/artifact  L0 model-artifact assessment (docs/18)
   POST /v1/assess/graph     architecture-graph trust-boundary analysis
   POST /v1/assess/blast-radius  reachability walk from a graph component
   POST /v1/assess/policy    deterministic policy evaluation
@@ -26,8 +27,18 @@ from fastapi.responses import Response
 
 from . import __version__
 from .assessment import SCORING_VERSION
-from .assessment.assess import assess_blast_radius, assess_graph, assess_policy, assess_prompts
+from .assessment.artifact import ALL_RULES as ARTIFACT_RULES
+from .assessment.artifact import ALLOWLIST_VERSION
+from .assessment.assess import (
+    assess_artifact,
+    assess_blast_radius,
+    assess_graph,
+    assess_policy,
+    assess_prompts,
+)
 from .assessment.models import (
+    AssessArtifactRequest,
+    AssessArtifactResponse,
     AssessBlastRadiusRequest,
     AssessBlastRadiusResponse,
     AssessGraphRequest,
@@ -75,6 +86,13 @@ def health() -> dict:
             "prompt_rules": len(ALL_RULES),
             "scoring_version": SCORING_VERSION,
         },
+        # L0 (docs/18). Surfaced beside the rest so a deploy can be verified
+        # from /health alone — including WHICH allowlist is live, because that
+        # is what decides every artifact verdict this service returns.
+        "artifact": {
+            "rules": len(ARTIFACT_RULES),
+            "allowlist_version": ALLOWLIST_VERSION,
+        },
     }
 
 
@@ -95,6 +113,20 @@ def scan_trace_endpoint(req: TraceScanRequest) -> TraceScanResponse:
 )
 def assess_prompt_endpoint(req: AssessPromptRequest) -> AssessPromptResponse:
     return assess_prompts(req)
+
+
+@app.post(
+    "/v1/assess/artifact",
+    response_model=AssessArtifactResponse,
+    dependencies=[Depends(require_api_key)],
+)
+def assess_artifact_endpoint(req: AssessArtifactRequest) -> AssessArtifactResponse:
+    """Judge model artifacts from their manifests.
+
+    The caller extracts (it holds the file); this service judges. No path is
+    read here and none may ever be — see assessment/artifact/__init__.py.
+    """
+    return assess_artifact(req)
 
 
 @app.post(

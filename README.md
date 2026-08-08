@@ -292,6 +292,7 @@ See [docs/06-roadmap.md](docs/06-roadmap.md) for the full plan.
 | [15 — Platform Evolution Proposals](docs/15-platform-evolution-proposals.md) | Six proposed next-level features (not yet committed): architecture-aware red-teaming, cross-tenant threat intel, gateway circuit breaker, canary fleet, blast-radius simulator, NL query copilot |
 | [16 — The Six New Ideas, Explained Simply](docs/16-proposals-explained-simply.md) | Doc 15's proposals in plain English, no jargon — for non-technical readers |
 | [17 — Build Log](docs/17-build-log.md) | **Living index** — every feature built from doc 15 so far, where its code and tests live, and what's not wired up yet |
+| [18 — Model Supply Chain (L0)](docs/18-model-supply-chain.md) | **Phases 0–1 shipped** — `argus-modelscan` CLI + `/v1/assess/artifact` catch code-execution payloads in model files (OWASP LLM05); ledger and load-time telemetry planned |
 | [RUNBOOK.md](RUNBOOK.md) | How to run the stack locally and reproduce the demo |
 
 ## Built on

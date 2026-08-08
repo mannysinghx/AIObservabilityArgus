@@ -9,6 +9,9 @@ can later run inside the worker, the gateway, or a CLI without changes.
 
 Modules:
     scanner/     20 deterministic prompt rules (IG-PROMPT-001..020)
+    artifact/    L0 model-artifact rules (ARG-ART-*) — judges the model FILE,
+                 not the prompt or the traffic. Opcodes are walked, never
+                 executed. See docs/18.
     graph        trust-boundary analysis over an architecture graph
     risk         transparent, versioned 5-factor risk scoring
     mitigations  ranked, architecture-aware mitigation catalog

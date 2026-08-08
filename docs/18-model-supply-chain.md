@@ -1,6 +1,6 @@
 # 18 — Model Supply Chain (L0: Artifact & Load Integrity)
 
-**Status:** Phase 0 complete (gate green) · Phases 1–4 planned
+**Status:** Phases 0–1 complete · Phases 2–4 planned
 **Owner:** TBD
 **Related:** [04 — Security Detection Engine](04-security-detection-engine.md) ·
 [05 — Data Model](05-data-model.md) · [13 — Feature Reference](13-feature-reference.md)
@@ -143,7 +143,8 @@ flowchart TB
     end
 
     MAN -->|HTTPS, KB| DET
-    DET --> WEB --> PG
+    WEB -->|assess| DET
+    WEB --> PG
     LOAD -->|model_load span +\naudit findings| ING
     ING --> DET
     ING --> CH
@@ -156,7 +157,7 @@ flowchart TB
 |---|---|---|
 | L0 rule engine | **new** | `services/detection/argus_detection/assessment/artifact/` |
 | `POST /v1/assess/artifact` | **new** | `services/detection/argus_detection/app.py` |
-| `argus-modelscan` CLI | **new** | `packages/py-sdk/argus/_modelscan/` |
+| `argus-modelscan` CLI | **new** | `services/detection/argus_detection/cli/modelscan.py` ¹ |
 | Load-time audit hook | **new** | `packages/py-sdk/argus/_loadguard.py` |
 | `model_artifacts` ledger | **new** | `deploy/postgres/migrations/018_*.sql` |
 | Findings storage | reused | `assessments` / `assessment_findings`, `kind='artifact'` |
@@ -166,6 +167,9 @@ flowchart TB
 | Trace/span storage | reused | `observations` with a new `type` enum value |
 | Event storage, alerting, dedup, suppression | reused | `security_events`, `apps/worker/src/alert.ts` |
 | Findings UI, reports, retention, redaction | reused | as-is |
+
+¹ Shipped from the detection package rather than the py-sdk (Phase 1 decision 1)
+so CI and the dashboard run byte-identical rule code.
 
 Everything on the "reused" side is why this is a feature and not a second
 product.
@@ -577,32 +581,82 @@ a `TODO(phase-1)` in `tests/artifact_corpus.py`.
 
 ---
 
-### Phase 1 — Static artifact scanner + CLI
+### Phase 1 — Static artifact scanner + CLI ✅ **COMPLETE**
 
 **Goal:** a team can scan a model in CI and see findings in Argus. Closes the
 LLM05 reporting hole.
 
-- `assessment/artifact/` package: `types.py` (manifest + `Rule` protocol reused
-  from `scanner/types.py`), `allowlist.py`, `rules.py` (`ARG-ART-001..010`),
-  `engine.py` (pure function, same contract as the prompt scanner).
-- `POST /v1/assess/artifact` on the detection service, alongside the existing
-  `/v1/assess/*` endpoints, same `require_api_key` dependency.
-- Extend `taxonomy.py`: `"supply-chain" → Category.supply_chain`. Note this
-  requires adding `supply_chain` to the `Category` enum in
-  [models.py](../services/detection/argus_detection/models.py) — Python-side
-  only in this phase; the ClickHouse enum comes in Phase 3.
-- `argus-modelscan` CLI in the py-sdk: reads the artifact locally, builds the
-  manifest, POSTs it, prints findings, exits non-zero on a threshold breach.
-- Web tier: `POST /api/assess/artifact` storing with `kind='artifact'`,
-  reusing the existing audit-log and guard patterns from `assessments.ts`.
-- Controls `SUP-1..4` appended to the catalog.
-- Reports and the Findings view pick these up with no work.
+**Definition of done — met.** `argus-modelscan ./pytorch_model.bin` on a
+checkpoint carrying `os.system` inside `data.pkl` prints a critical
+`ARG-ART-002` naming the offending archive member, and exits 1. The same
+manifest through `POST /v1/assess/artifact` returns the finding enriched with
+the LLM05 framework reference, a risk breakdown, and ranked mitigations, stored
+as `kind='artifact'` for the Findings view.
 
-**Definition of done:** `argus-modelscan ./model.pt` on a known-bad artifact
-produces a critical `ARG-ART-002` finding, visible in the Findings view with
-an LLM05 framework reference, and exits 1.
+**Shipped, no migrations · no ClickHouse change · no SDK publish:**
 
-**No migrations. No SDK publish. No ClickHouse change.**
+| Change | Where |
+|---|---|
+| `POST /v1/assess/artifact` | [app.py](../services/detection/argus_detection/app.py) |
+| `assess_artifact()` orchestration | [assess.py](../services/detection/argus_detection/assessment/assess.py) |
+| Manifest wire shapes | [assessment/models.py](../services/detection/argus_detection/assessment/models.py) |
+| `Category.supply_chain` | [models.py](../services/detection/argus_detection/models.py) |
+| `"supply-chain"` taxonomy bridge | [taxonomy.py](../services/detection/argus_detection/assessment/taxonomy.py) |
+| 4 supply-chain mitigations | [mitigations.py](../services/detection/argus_detection/assessment/mitigations.py) |
+| `argus-modelscan` CLI | [cli/modelscan.py](../services/detection/argus_detection/cli/modelscan.py) |
+| `runArtifactAssessment` + `validateArtifacts` | [assessments.ts](../apps/web/src/assessments.ts) |
+| `POST /api/assess/artifact` | [app.ts](../apps/web/src/app.ts) |
+| Controls `SUP-1..4` | [controls.ts](../apps/web/src/controls.ts) |
+
+**Verification:** 242 Python tests (was 217) · 135 TS + 12 extension tests
+(was 121 + 12) · ruff clean · `tsc -b` clean · L0 gate still 24/24 recall, 0 FP.
+
+**Decisions taken during the build, differing from the plan above:**
+
+1. **The CLI ships from `argus-detection`, not the py-sdk.** Open question §10.1
+   resolved. A CI runner has no business installing a *tracer*, but the deciding
+   argument was drift: shipping the CLI beside the engine means CI and the
+   dashboard run byte-identical rule code and cannot disagree about what the
+   allowlist says. The cost is that `pip install argus-detection` pulls fastapi
+   transitively. If CI image weight ever matters, the fix is an optional
+   `[server]` extra — deferred rather than done, because moving fastapi out of
+   the base dependencies today would break the existing Dockerfile, Makefile and
+   CI job for no present benefit.
+2. **The CLI judges locally by default; `--server` is opt-in.** The plan had the
+   CLI extract and the service judge, always. In practice local judgement means
+   a CI gate needs no service, no network and no credentials — which is most of
+   what makes it adoptable — and the response carries `allowlist_version` so a
+   stale CLI is detectable rather than silently authoritative. `--server` exists
+   for when the deployment's allowlist is newer or the run should be recorded.
+3. **Unreachable server exits 2, never 0.** A gate that passes because it could
+   not reach its scanner reports "clean" for every build after the URL rots, and
+   nobody investigates a green build.
+4. **`walk_zip_archive` now accepts a path, not just bytes.** A checkpoint is
+   routinely tens of gigabytes while its `data.pkl` is a few hundred kilobytes.
+   Reading the archive lazily sets the scanner's memory cost by the pickle
+   rather than by the weights.
+5. **Oversized non-zip artifacts report a parse error, not silence.** Above the
+   inline cap the opcode walk cannot run; rendering that as "no findings" would
+   be a silent false negative on exactly the largest artifacts.
+6. **Manifests are validated, and digests are required.** The body arrives from
+   an unattended CI runner — the only assessment input that does. A manifest
+   without a lowercase 64-hex digest is refused rather than stored anonymously:
+   the digest is what a finding is *about* and what the Phase-2 ledger keys on.
+   Uppercase is rejected rather than normalised, because the same artifact
+   stored under two spellings would split its history and make the digest drift
+   in ARG-ART-013 undetectable.
+7. **The manifest's `globals` list is not persisted.** Findings keep their
+   redacted evidence excerpt; retaining the full reference list would mean
+   holding a map of the customer's proprietary model internals to no end. Same
+   reasoning as prompt contents in `013_assessments.sql`.
+
+**Not done in Phase 1 — CI cannot yet store a scan.** `POST /api/assess/artifact`
+is a session route, and the public `/v1/*` surface only has `ingest` and `read`
+scopes ([apikeys.ts](../packages/shared/src/apikeys.ts)). Submitting from CI
+needs a third scope, which is a change to key creation, the UI, and
+`parseScopes`. Deferred to Phase 2, where it lands beside the ledger CI actually
+wants to write to. Until then CI gets the exit code (which is the gate) and the
+dashboard gets the stored history.
 
 ---
 
@@ -711,9 +765,10 @@ picklescan (MIT) covers the same ground.
 
 ## 10. Open questions
 
-1. **CLI packaging** — inside `packages/py-sdk` (one install, but couples the
-   scanner's release cadence to the tracer's) or a separate `packages/py-cli`?
-   Leaning separate: CI runners should not install a tracer.
+1. ~~**CLI packaging**~~ — **resolved in Phase 1**: shipped from
+   `argus-detection` as the `argus-modelscan` console script. Neither option
+   originally listed won; drift did. Beside the engine, CI and the dashboard
+   cannot disagree about the allowlist. See Phase 1 decision 1 for the cost.
 2. **Directory digest scheme** — Merkle root over sorted `(relpath, sha256)`
    pairs is the obvious choice, but it must be pinned and versioned in Phase 1
    because every stored digest depends on it.

@@ -12,8 +12,18 @@ from dataclasses import asdict
 from . import blastradius as blastradiusmod
 from . import graph as graphmod
 from . import taxonomy
+from .artifact import (
+    ALLOWLIST_VERSION,
+    ArtifactContext,
+    ArtifactManifest,
+    GlobalRef,
+    MemberRef,
+    scan_artifact,
+)
 from .mitigations import AppFacts, rank_mitigations
 from .models import (
+    AssessArtifactRequest,
+    AssessArtifactResponse,
     AssessBlastRadiusRequest,
     AssessBlastRadiusResponse,
     AssessContext,
@@ -149,6 +159,129 @@ def assess_prompts(req: AssessPromptRequest) -> AssessPromptResponse:
         max_severity=_worst([f.severity for f in findings]),
         overall_risk=max((f.risk.final_score for f in findings), default=0),
         scoring_version=SCORING_VERSION,
+        findings=findings,
+    )
+
+
+def assess_artifact(req: AssessArtifactRequest) -> AssessArtifactResponse:
+    """Judge one or more model artifacts from their manifests (docs/18 §4).
+
+    Same shape as `assess_prompts` — scan, risk-score, rank mitigations, bridge
+    into the runtime taxonomy — over a different subject. `document_index` and
+    `document_name` carry the artifact's position and path so the finding lands
+    in the same storage and the same Findings view as everything else, with no
+    translation layer.
+    """
+    facts = _app_facts(req.context)
+    ctx = ArtifactContext(first_party_prefixes=tuple(req.first_party_prefixes))
+    observed = {c for c in req.context.observed_categories if c}
+
+    findings: list[AssessFinding] = []
+    for idx, art in enumerate(req.artifacts):
+        man = ArtifactManifest(
+            path=art.path,
+            sha256=art.sha256,
+            size_bytes=art.size_bytes,
+            format=art.format,
+            source_uri=art.source_uri,
+            revision=art.revision,
+            globals=[
+                GlobalRef(module=g.module, name=g.name, opcode=g.opcode,
+                          offset=g.offset, member=g.member)
+                for g in art.globals
+            ],
+            opcode_summary=dict(art.opcode_summary),
+            archive_members=[
+                MemberRef(name=m.name, size=m.size, compress_type=m.compress_type,
+                          is_pickle=m.is_pickle, raw_name=m.raw_name or m.name)
+                for m in art.archive_members
+            ],
+            tensor_keys=list(art.tensor_keys),
+            declared_arch=art.declared_arch,
+            onnx_custom_ops=list(art.onnx_custom_ops),
+            onnx_external_data=list(art.onnx_external_data),
+            keras_layer_types=list(art.keras_layer_types),
+            parse_errors=list(art.parse_errors),
+        )
+
+        for m in scan_artifact(man, ctx):
+            argus_cat = taxonomy.argus_category(m.category)
+            seen_live = bool(argus_cat) and argus_cat in observed
+            risk = compute_risk(
+                factors_from_signal(
+                    severity=m.severity,
+                    confidence=m.confidence,
+                    is_public=req.context.is_public,
+                    has_compensating_controls=req.context.has_compensating_controls,
+                    observed_exploitation=seen_live,
+                ),
+                note=(
+                    "Likelihood is maximal because supply-chain activity has been "
+                    "observed against this application in production."
+                    if seen_live else ""
+                ),
+            )
+            recs = (
+                rank_mitigations(m.category, facts)[: req.top_mitigations]
+                if req.top_mitigations
+                else []
+            )
+            findings.append(
+                AssessFinding(
+                    document_index=idx,
+                    # The artifact path is what an operator recognizes; the digest
+                    # is what identifies it. Both matter, so the name carries the
+                    # path and the evidence carries the rest.
+                    document_name=art.path or art.sha256[:16],
+                    rule_id=m.rule_id,
+                    title=m.title,
+                    category=m.category,
+                    severity=m.severity,
+                    confidence=m.confidence,
+                    explanation=m.explanation,
+                    affected_lines=m.affected_lines,
+                    evidence=m.evidence,
+                    recommendation=m.recommendation,
+                    frameworks=[asdict(f) for f in m.frameworks],
+                    argus_category=argus_cat,
+                    argus_severity=taxonomy.argus_severity(m.severity),
+                    observed_in_production=seen_live,
+                    risk=RiskBreakdown(
+                        factors=asdict(risk.factors),
+                        weights=risk.weights,
+                        contributions=risk.contributions,
+                        base_score=risk.base_score,
+                        confidence_adjustment=risk.confidence_adjustment,
+                        final_score=risk.final_score,
+                        severity=risk.severity,
+                        rationale=risk.rationale,
+                        scoring_version=risk.scoring_version,
+                    ),
+                    mitigations=[
+                        MitigationRec(
+                            key=r.mitigation.key,
+                            title=r.mitigation.title,
+                            category=r.mitigation.category,
+                            priority=r.mitigation.priority,
+                            difficulty=r.mitigation.difficulty,
+                            expected_risk_reduction=r.mitigation.expected_risk_reduction,
+                            score=r.score,
+                            rationale=r.rationale,
+                            implementation_guidance=r.mitigation.implementation_guidance,
+                            validation_procedure=r.mitigation.validation_procedure,
+                        )
+                        for r in recs
+                    ],
+                )
+            )
+
+    return AssessArtifactResponse(
+        project_id=req.project_id,
+        finding_count=len(findings),
+        max_severity=_worst([f.severity for f in findings]),
+        overall_risk=max((f.risk.final_score for f in findings), default=0),
+        scoring_version=SCORING_VERSION,
+        allowlist_version=ALLOWLIST_VERSION,
         findings=findings,
     )
 

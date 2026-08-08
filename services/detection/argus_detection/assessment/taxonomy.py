@@ -34,6 +34,11 @@ ASSESSMENT_TO_ARGUS_CATEGORY: dict[str, Category | None] = {
     "human-approval":    Category.excessive_agency,
     "unsafe-output":     Category.excessive_agency,   # model output driving unchecked actions
     "prompt-quality":    None,                        # hygiene only — no attack class
+    # L0 artifact findings (ARG-ART-*, docs/18). Unlike every other row here,
+    # this is not "closest attack class" — supply_chain is its own runtime
+    # category, because a malicious model file is not a variant of prompt
+    # injection and filing it under one would make both harder to reason about.
+    "supply-chain":      Category.supply_chain,
 }
 
 # Architecture-graph insight rules (graph.py) → closest Argus attack category.

@@ -320,6 +320,168 @@ export async function runGraphAssessment(
 
 const MAX_GRAPH_ITEMS = 200;
 
+// ---------------- artifact assessments (L0 — docs/18) ----------------
+
+/** One model-file manifest, extracted at the edge by `argus-modelscan`.
+ *  Kilobytes: the weights never travel, only what a pickle stream would call. */
+export interface ArtifactManifestIn {
+  path?: string;
+  sha256?: string;
+  size_bytes?: number;
+  format?: string;
+  source_uri?: string;
+  revision?: string;
+  globals?: { module?: string; name?: string; opcode?: string; offset?: number; member?: string }[];
+  opcode_summary?: Record<string, number>;
+  archive_members?: {
+    name?: string; size?: number; compress_type?: number; is_pickle?: boolean; raw_name?: string;
+  }[];
+  tensor_keys?: string[];
+  declared_arch?: string;
+  onnx_custom_ops?: string[];
+  onnx_external_data?: string[];
+  keras_layer_types?: string[];
+  parse_errors?: string[];
+}
+
+interface AssessArtifactWire extends AssessPromptWire {
+  allowlist_version: string;
+}
+
+/** A manifest is machine-generated and small, but it arrives from a CI runner
+ *  we do not control, so it gets the same treatment as any other request body.
+ *  The caps are generous against real artifacts and cheap against a body built
+ *  to make the engine do work: a torch state_dict resolves a few dozen globals,
+ *  not a hundred thousand. */
+const MAX_ARTIFACTS = 100;
+const MAX_GLOBALS_PER_ARTIFACT = 20_000;
+const MAX_MEMBERS_PER_ARTIFACT = 20_000;
+
+export function validateArtifacts(artifacts: ArtifactManifestIn[] | undefined): string | null {
+  if (!Array.isArray(artifacts) || artifacts.length === 0) return "artifacts required";
+  if (artifacts.length > MAX_ARTIFACTS) return `at most ${MAX_ARTIFACTS} artifacts`;
+  for (const a of artifacts) {
+    if (a === null || typeof a !== "object") return "each artifact must be an object";
+    // The digest is the artifact's identity — it is what a finding is about and
+    // what the Phase-2 ledger will key on. A manifest without one is not
+    // something we can file a finding against.
+    if (typeof a.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(a.sha256)) {
+      return "each artifact needs a sha256 (64 hex chars)";
+    }
+    if ((a.globals?.length ?? 0) > MAX_GLOBALS_PER_ARTIFACT) {
+      return `at most ${MAX_GLOBALS_PER_ARTIFACT} globals per artifact`;
+    }
+    if ((a.archive_members?.length ?? 0) > MAX_MEMBERS_PER_ARTIFACT) {
+      return `at most ${MAX_MEMBERS_PER_ARTIFACT} archive members per artifact`;
+    }
+  }
+  return null;
+}
+
+/**
+ * Scan model artifacts and record the run.
+ *
+ * Stored as `kind='artifact'` in the same tables as prompt assessments. That is
+ * not a shortcut: an artifact finding has a rule id, a severity, framework
+ * refs, a risk breakdown and an analyst disposition — the same shape, about a
+ * different subject — so it belongs in the Findings view alongside everything
+ * else rather than in a parallel screen nobody opens.
+ *
+ * What is NOT stored is the manifest's `globals` list. The already-redacted
+ * evidence excerpt on each finding names the references that mattered; keeping
+ * the full list would mean retaining a map of the customer's proprietary model
+ * internals to no end.
+ */
+export async function runArtifactAssessment(
+  projectId: string,
+  artifacts: ArtifactManifestIn[],
+  firstPartyPrefixes: string[],
+  createdBy: string | null,
+): Promise<(RunResult & { allowlistVersion: string }) | null> {
+  const safe = safeProjectId(projectId);
+  if (!safe) return null;
+
+  let observed: string[] = [];
+  try {
+    observed = await observedCategories(safe);
+  } catch { /* score without runtime evidence rather than failing the run */ }
+
+  const wire = await callDetection<AssessArtifactWire>("/v1/assess/artifact", {
+    project_id: safe,
+    artifacts,
+    first_party_prefixes: firstPartyPrefixes,
+    context: { observed_categories: observed },
+  });
+
+  // Identity only — path, digest, format, size. See the doc comment above.
+  const docMeta = artifacts.map((a) => ({
+    kind: a.format ?? "unknown",
+    name: a.path ?? (a.sha256 ?? "").slice(0, 16),
+    sha256: a.sha256 ?? "",
+    size_bytes: a.size_bytes ?? 0,
+    source_uri: a.source_uri ?? "",
+    revision: a.revision ?? "",
+  }));
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query<{ id: string }>(
+      `INSERT INTO assessments
+         (project_id, kind, context, documents, finding_count, max_severity,
+          overall_risk, scoring_version, created_by)
+       VALUES ($1, 'artifact', $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id`,
+      [
+        safe,
+        // The allowlist decides every verdict here, so it is stored beside the
+        // scoring version: a finding nobody can reproduce is a finding nobody
+        // can argue with.
+        JSON.stringify({ first_party_prefixes: firstPartyPrefixes, allowlist_version: wire.allowlist_version }),
+        JSON.stringify(docMeta),
+        wire.finding_count,
+        wire.max_severity,
+        wire.overall_risk,
+        wire.scoring_version,
+        createdBy,
+      ],
+    );
+    const assessmentId = rows[0].id;
+    for (const f of wire.findings) {
+      await client.query(
+        `INSERT INTO assessment_findings
+           (assessment_id, project_id, document_index, document_name, rule_id, title,
+            category, severity, confidence, explanation, affected_lines, evidence,
+            recommendation, frameworks, argus_category, argus_severity, risk, mitigations,
+            observed_in_production)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+        [
+          assessmentId, safe, f.document_index, f.document_name, f.rule_id, f.title,
+          f.category, f.severity, f.confidence, f.explanation, f.affected_lines, f.evidence,
+          f.recommendation, JSON.stringify(f.frameworks), f.argus_category, f.argus_severity,
+          JSON.stringify(f.risk), JSON.stringify(f.mitigations), !!f.observed_in_production,
+        ],
+      );
+    }
+    await client.query("COMMIT");
+    return {
+      id: assessmentId,
+      kind: "artifact",
+      findingCount: wire.finding_count,
+      maxSeverity: wire.max_severity,
+      overallRisk: wire.overall_risk,
+      scoringVersion: wire.scoring_version,
+      allowlistVersion: wire.allowlist_version,
+      findings: wire.findings,
+    };
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 export function validateGraph(
   nodes: GraphNodeIn[] | undefined,
   edges: GraphEdgeIn[] | undefined,

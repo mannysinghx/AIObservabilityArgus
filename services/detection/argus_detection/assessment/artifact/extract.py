@@ -17,7 +17,7 @@ from .opcodes import sniff_format, walk_pickle, walk_zip_archive
 from .types import ArtifactManifest
 
 
-def _safetensors_keys(data: bytes) -> tuple[list[str], list[str]]:
+def safetensors_keys(data: bytes) -> tuple[list[str], list[str]]:
     """Tensor names from a safetensors header. Header-only — the tensor bytes
     are never touched, and the `safetensors` package is not required."""
     errors: list[str] = []
@@ -64,6 +64,6 @@ def build_manifest(
         man.opcode_summary = counts
         man.parse_errors = errors
     elif fmt == "safetensors":
-        man.tensor_keys, man.parse_errors = _safetensors_keys(data)
+        man.tensor_keys, man.parse_errors = safetensors_keys(data)
 
     return man

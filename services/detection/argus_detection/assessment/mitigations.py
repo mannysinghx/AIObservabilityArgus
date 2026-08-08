@@ -161,6 +161,60 @@ CATALOG: list[CatalogMitigation] = [
         validation_procedure="Ask the model to escalate privileges; confirm the server denies it.",
         frameworks=[{"framework": "OWASP-LLM", "requirement": "LLM08"}],
     ),
+    # ── L0 / model supply chain (docs/18) ────────────────────────────────────
+    # Every mitigation above changes how an application handles text. These
+    # change what it is allowed to load, which is a different lever entirely —
+    # and the only one that helps against a payload that runs before the first
+    # token exists.
+    CatalogMitigation(
+        key="MIT-SAFETENSORS", title="Migrate weights to safetensors",
+        category="serialization-safety",
+        description="Store weights in a format that cannot carry executable content.",
+        applicable_categories=["supply-chain"],
+        implementation_guidance="Convert checkpoints with safetensors.torch.save_file and load with "
+                                "weights-only APIs. For artifacts that must stay pickle-backed "
+                                "(sklearn/joblib), treat the source as the trust decision and pin it.",
+        priority="high", difficulty="low", expected_risk_reduction=70,
+        validation_procedure="Rescan the artifact; ARG-ART-005 must not fire and the format must "
+                             "report as safetensors.",
+        frameworks=[{"framework": "OWASP-LLM", "requirement": "LLM05"}],
+    ),
+    CatalogMitigation(
+        key="MIT-ARTIFACT-PINNING", title="Pin model artifacts by digest",
+        category="serialization-safety",
+        description="Resolve models by content hash, never by a mutable tag or branch name.",
+        applicable_categories=["supply-chain"],
+        implementation_guidance="Record the sha256 of every artifact you deploy and fail the load "
+                                "when it changes. A tag can be repointed by anyone with registry "
+                                "write access; a digest cannot.",
+        priority="critical", difficulty="low", expected_risk_reduction=55,
+        validation_procedure="Repoint the tag at a different artifact; confirm the deploy fails.",
+        frameworks=[{"framework": "OWASP-LLM", "requirement": "LLM05"}],
+    ),
+    CatalogMitigation(
+        key="MIT-ARTIFACT-SIGNING", title="Sign and verify model artifacts",
+        category="serialization-safety",
+        description="Require a verifiable signature from a known signer before an artifact loads.",
+        applicable_categories=["supply-chain"],
+        implementation_guidance="Sign with OpenSSF model_signing (Sigstore keyless — no PKI to run) "
+                                "and verify in the deploy step. For air-gapped estates, a detached "
+                                "minisign signature over the digest achieves the same.",
+        priority="high", difficulty="medium", expected_risk_reduction=50,
+        validation_procedure="Present an unsigned artifact; confirm it is refused.",
+        frameworks=[{"framework": "NIST-AI-RMF", "requirement": "MANAGE"}],
+    ),
+    CatalogMitigation(
+        key="MIT-REGISTRY-ACCESS", title="Restrict and audit model registry access",
+        category="serialization-safety",
+        description="Treat registry write access as production deploy access, because it is.",
+        applicable_categories=["supply-chain"],
+        implementation_guidance="Require authentication for pulls, restrict pushes to a release "
+                                "pipeline, and log every write. Model smuggling needs registry "
+                                "write access; nothing downstream will notice if it is obtained.",
+        priority="high", difficulty="medium", expected_risk_reduction=45,
+        validation_procedure="Attempt an unauthenticated push; confirm refusal and an audit entry.",
+        frameworks=[{"framework": "OWASP-LLM", "requirement": "LLM05"}],
+    ),
 ]
 
 CATALOG_BY_KEY = {m.key: m for m in CATALOG}

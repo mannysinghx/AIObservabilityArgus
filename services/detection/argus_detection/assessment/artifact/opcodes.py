@@ -29,8 +29,10 @@ it cannot raise on a stream shaped in a way we did not anticipate.
 from __future__ import annotations
 
 import io
+import os
 import pickletools
 import zipfile
+from typing import BinaryIO
 
 from .types import GlobalRef, MemberRef
 
@@ -146,9 +148,15 @@ def _merge_counts(into: dict[str, int], other: dict[str, int]) -> None:
 
 
 def walk_zip_archive(
-    data: bytes,
+    source: bytes | str | os.PathLike | BinaryIO,
 ) -> tuple[list[GlobalRef], dict[str, int], list[MemberRef], list[str]]:
     """Walk a `.pt`-style zip archive: enumerate members, walk pickle members.
+
+    `source` may be bytes or anything `zipfile.ZipFile` accepts. Accepting a
+    path matters: a checkpoint is routinely tens of gigabytes while its
+    `data.pkl` — the only member with opcodes in it — is a few hundred
+    kilobytes. Reading the archive lazily means the scanner's memory cost is
+    set by the pickle, not by the weights.
 
     Member names are preserved verbatim. Normalizing them here would erase the
     path-traversal evidence that ARG-ART-006 exists to find.
@@ -160,7 +168,7 @@ def walk_zip_archive(
     budget = MAX_TOTAL_PICKLE_BYTES
 
     try:
-        zf = zipfile.ZipFile(io.BytesIO(data))
+        zf = zipfile.ZipFile(io.BytesIO(source) if isinstance(source, bytes) else source)
     except Exception as e:  # noqa: BLE001
         return found, counts, members, [f"not a readable zip: {type(e).__name__}: {e}"]
 

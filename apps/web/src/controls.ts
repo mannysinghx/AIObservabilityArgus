@@ -83,6 +83,25 @@ export const CONTROL_CATALOG: CatalogControl[] = [
   { control_key: "IR-1", domain: "incident_response", objective: "AI incident response plan",
     description: "A documented playbook exists for prompt-injection and data-exposure incidents.",
     review_frequency: "annual", frameworks: [{ framework: "NIST-AI-RMF", requirement: "MANAGE" }] },
+  // Model supply chain (docs/18). Every control above is about how the
+  // application handles text; these are about what it is allowed to load, which
+  // is the only lever that helps against a payload that executes at
+  // deserialization — before the first token exists. OWASP LLM05 had no
+  // controls and no rules until L0; adoptCatalog is idempotent, so existing
+  // projects pick these up on their next adopt without disturbing any status
+  // somebody already set.
+  { control_key: "SUP-1", domain: "supply_chain", objective: "Model artifacts pinned by digest",
+    description: "Models are resolved by content hash, never by a mutable tag or branch.",
+    review_frequency: "quarterly", frameworks: [{ framework: "OWASP-LLM", requirement: "LLM05" }] },
+  { control_key: "SUP-2", domain: "supply_chain", objective: "No code-capable serialization in production",
+    description: "Production weights are stored in safetensors or another format that cannot execute on load.",
+    review_frequency: "quarterly", frameworks: [{ framework: "OWASP-LLM", requirement: "LLM05" }] },
+  { control_key: "SUP-3", domain: "supply_chain", objective: "Model registry access controlled and audited",
+    description: "Registry writes are restricted to a release pipeline and every write is logged.",
+    review_frequency: "quarterly", frameworks: [{ framework: "OWASP-LLM", requirement: "LLM05" }] },
+  { control_key: "SUP-4", domain: "supply_chain", objective: "Model artifacts signed and verified",
+    description: "Artifacts carry a verifiable signature that is checked before they are loaded.",
+    review_frequency: "quarterly", frameworks: [{ framework: "NIST-AI-RMF", requirement: "MANAGE" }] },
 ];
 
 export async function listControls(projectId: string): Promise<ControlRow[]> {

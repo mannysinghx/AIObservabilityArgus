@@ -10,6 +10,13 @@ dependencies = [
     "pyyaml>=6.0",
 ]
 
+[project.scripts]
+# The CI-side entry point (docs/18 Phase 1). Shipped from this package rather
+# than its own so the CLI and the service run byte-identical rule code — a
+# verdict in CI and a verdict in the dashboard must never disagree about what
+# the allowlist says.
+argus-modelscan = "argus_detection.cli.modelscan:main"
+
 [project.optional-dependencies]
 # L2 classifier models are optional/pluggable — not required for the Phase 1 heuristic MVP.
 l2 = [
